@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Expo
+.expo/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local data
+*.sqlite
+*.sqlite-journal
+data/
+
+# Logs and coverage
+*.log
+coverage/
+
+# System / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Agent projects (local data, not versioned)
+projects/*
+!projects/.gitkeep
+
+# Playwright / E2E
+.playwright-mcp/
+e2e/test-results/
+e2e/playwright-report/
+playwright-report/
+test-results/

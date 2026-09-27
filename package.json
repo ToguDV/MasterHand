@@ -1,0 +1,29 @@
+{
+  "name": "masterhand",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "e2e"
+  ],
+  "overrides": {
+    "react-native": "0.86.3"
+  },
+  "scripts": {
+    "dev:server": "npm run dev -w @masterhand/server",
+    "dev:web": "npm run dev -w @masterhand/web",
+    "dev:desktop": "npm run dev -w @masterhand/desktop",
+    "dev:mobile": "npm run start -w @masterhand/mobile",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @masterhand/e2e",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "e2e:browsers": "npm run e2e:browsers -w @masterhand/e2e",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
+  }
+}

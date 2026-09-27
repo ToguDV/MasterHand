@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-push: full gate before sharing a branch (mirrors CI).
+set -e
+
+if [ -n "$MASTERHAND_SKIP_HOOKS" ]; then
+  echo "[pre-push] skipped (MASTERHAND_SKIP_HOOKS)"
+  exit 0
+fi
+
+echo "[pre-push] typecheck + unit tests + E2E + builds"
+npm run typecheck
+npm test
+npm run test:e2e
+npm run build

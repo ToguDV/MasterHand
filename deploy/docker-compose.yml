@@ -1,0 +1,51 @@
+name: masterhand
+
+services:
+  masterhand:
+    build:
+      context: ..
+      dockerfile: deploy/server.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8787"
+      OPENCODE_URL: http://opencode:4096
+      DATA_DIR: /data
+      WEB_DIST: apps/web/dist
+    volumes:
+      - masterhand_data:/data
+    ports:
+      # Bind to 127.0.0.1 when your reverse proxy runs on the host.
+      - "${MASTERHAND_BIND:-0.0.0.0}:${MASTERHAND_PORT:-8787}:8787"
+    networks:
+      - internal
+    depends_on:
+      - opencode
+
+  opencode:
+    build:
+      context: .
+      dockerfile: opencode.Dockerfile
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - opencode_config:/home/node/.config/opencode
+      - opencode_data:/home/node/.local/share/opencode
+      - ../projects:/workspace
+    working_dir: /workspace
+    expose:
+      - "4096"
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  masterhand_data:
+  opencode_config:
+  opencode_data:

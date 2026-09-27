@@ -1,0 +1,30 @@
+#!/bin/sh
+# Commit-msg: enforce Conventional Commits in English.
+set -e
+
+if [ -n "$MASTERHAND_SKIP_HOOKS" ]; then
+  exit 0
+fi
+
+message_file="$1"
+first_line=$(head -n 1 "$message_file")
+
+# Allow git-generated and fixup messages.
+case "$first_line" in
+  Merge\ *|Revert\ *|fixup!*|squash!*) exit 0 ;;
+esac
+
+pattern='^(feat|fix|docs|refactor|test|chore|perf|build|ci|revert)(\([a-z0-9./_-]+\))?!?: .+'
+
+if ! printf '%s' "$first_line" | grep -Eq "$pattern"; then
+  echo "[commit-msg] Message must follow Conventional Commits in English, e.g.:" >&2
+  echo "  feat(web): add model selector" >&2
+  echo "  fix(server): handle expired token" >&2
+  echo "Got: $first_line" >&2
+  exit 1
+fi
+
+if [ "${#first_line}" -gt 100 ]; then
+  echo "[commit-msg] First line is too long (${#first_line} > 100 characters)" >&2
+  exit 1
+fi

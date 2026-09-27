@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit: fast gate. Full E2E and builds run in pre-push and CI.
+set -e
+
+if [ -n "$MASTERHAND_SKIP_HOOKS" ]; then
+  echo "[pre-commit] skipped (MASTERHAND_SKIP_HOOKS)"
+  exit 0
+fi
+
+echo "[pre-commit] typecheck + unit tests"
+npm run typecheck
+npm test
