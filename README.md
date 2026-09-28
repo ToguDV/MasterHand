@@ -18,22 +18,32 @@ The BFF is the only bridge: clients never talk to opencode directly. TLS is left
 
 ## Quick start (development)
 
-Development runs the BFF and the web app directly on your machine from source, so it uses its **own** environment file — not the Docker one under `deploy/`.
+Development runs opencode, the BFF and a front end directly on your machine from source, using its **own** environment file — not the Docker one under `deploy/`. Each command below is self-contained: it starts everything the front end needs.
 
 ```bash
 npm install
 cp apps/server/.env.example apps/server/.env.local   # development secrets (git-ignored)
-npm run dev:server    # BFF on :8787 (loads apps/server/.env.local)
-npm run dev:web       # web app on :5173 (proxies /api)
-npm run dev:desktop   # Electron shell pointing at MASTERHAND_URL (:8787 by default)
-npm run dev:mobile    # Expo dev server for iOS/Android
+
+npm run dev:web       # opencode + BFF (:8787) + web (:5173)
+npm run dev:desktop   # opencode + BFF + Electron shell
+npm run dev:mobile    # opencode + BFF + Expo dev server
+npm run dev:server    # opencode + BFF only
+
 npm test              # tests (vitest: BFF + client-core)
 npm run test:e2e      # E2E (Playwright + mocked opencode); run `npm run e2e:browsers` once
 ```
 
-`apps/server/.env.local` is loaded automatically by `npm run dev:server` via `tsx --env-file-if-exists` and is **not** used by Docker. It ships with `COOKIE_SECURE=false` (local HTTP) and `OPENCODE_URL=http://127.0.0.1:4096`; point the BFF at a locally running `opencode serve` before starting the web app.
+`scripts/dev.mjs` orchestrates the dev stack:
 
-To try the web app from a phone on the same network: `npm run dev:web -- --host` and open `http://<your-PC-IP>:5173`.
+- loads `apps/server/.env.local` (shipped with `COOKIE_SECURE=false` and `OPENCODE_URL=http://127.0.0.1:4096`);
+- starts `opencode serve` on the `OPENCODE_URL` host/port, **unless** it is already listening — so it will not fight a running instance; set `MASTERHAND_SKIP_OPENCODE=1` to always reuse an external one;
+- starts the BFF (`:8787`) and the requested front end, and stops the whole group when any process exits or on `Ctrl+C`.
+
+If `opencode` is not on your `PATH`, install it first (`npm install -g opencode-ai`, or see https://opencode.ai/docs/).
+
+`apps/server/.env.local` is also loaded by `npm run dev:server`'s own `tsx --env-file-if-exists`; it is **not** used by Docker.
+
+To try the web app from a phone on the same network: `npm run dev:web -- --host` and open `http://<your-PC-IP>:5173`. Extra arguments after `--` are forwarded to the front end.
 
 ## Deployment
 
