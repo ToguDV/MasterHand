@@ -19,6 +19,7 @@
     "dev:web": "node scripts/dev.mjs web",
     "dev:desktop": "node scripts/dev.mjs desktop",
     "dev:mobile": "node scripts/dev.mjs mobile",
+    "dev:stop": "node scripts/stop.mjs",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
