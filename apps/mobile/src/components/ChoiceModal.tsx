@@ -1,4 +1,5 @@
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native"
+import { useEffect, useState } from "react"
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import { colors } from "../theme"
 
 export interface ChoiceOption {
@@ -21,13 +22,34 @@ export function ChoiceModal({
   onSelect: (value: string) => void
   onClose: () => void
 }) {
+  const [query, setQuery] = useState("")
+
+  useEffect(() => {
+    if (!visible) setQuery("")
+  }, [visible])
+
+  const term = query.trim().toLowerCase()
+  const filtered = term ? options.filter((option) => option.label.toLowerCase().includes(term)) : options
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
-          <ScrollView style={styles.list}>
-            {options.map((option) => (
+          {options.length > 8 && (
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search…"
+              placeholderTextColor={colors.muted}
+              autoCorrect={false}
+              autoCapitalize="none"
+              style={styles.search}
+            />
+          )}
+          <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+            {filtered.length === 0 && <Text style={styles.empty}>No matches</Text>}
+            {filtered.map((option) => (
               <Pressable
                 key={option.value}
                 style={[styles.option, option.value === selected && styles.optionSelected]}
@@ -69,6 +91,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  search: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    color: colors.text,
+    fontSize: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  empty: {
+    color: colors.muted,
+    fontSize: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   list: {
     flexGrow: 0,

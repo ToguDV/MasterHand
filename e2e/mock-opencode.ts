@@ -203,7 +203,23 @@ const server = createServer((req, res) => {
           {
             id: "test",
             name: "Test",
-            models: { "test-model": { id: "test-model", name: "Test Model", variants: { low: {}, high: {} } } },
+            models: {
+              "test-model": { id: "test-model", name: "Test Model", variants: { low: {}, high: {} } },
+              alpha: { id: "alpha", name: "Alpha", variants: {} },
+              beta: { id: "beta", name: "Beta", variants: {} },
+              gamma: { id: "gamma", name: "Gamma", variants: {} },
+              delta: { id: "delta", name: "Delta", variants: {} },
+            },
+          },
+          {
+            id: "other",
+            name: "Other",
+            models: {
+              solo: { id: "solo", name: "Solo", variants: {} },
+              echo: { id: "echo", name: "Echo", variants: {} },
+              nova: { id: "nova", name: "Nova", variants: {} },
+              flash: { id: "flash", name: "Flash", variants: {} },
+            },
           },
         ],
         default: { test: "test-model" },

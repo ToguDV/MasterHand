@@ -11,6 +11,7 @@ import {
   variantLabel,
 } from "@masterhand/client-core"
 import { client } from "../client"
+import { SearchSelect } from "./SearchSelect"
 
 export function Composer({ sessionID, busy }: { sessionID: string; busy: boolean }) {
   const agentsQuery = useAgents(client)
@@ -79,43 +80,35 @@ export function Composer({ sessionID, busy }: { sessionID: string; busy: boolean
     }
   }
 
-  const selectClass =
-    "min-w-0 flex-1 basis-32 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-indigo-500"
-
   return (
     <div className="pb-safe border-t border-zinc-800 bg-zinc-950/95 px-3 pt-2 md:px-6">
       <div className="mx-auto w-full max-w-3xl space-y-2">
         <div className="flex flex-wrap gap-2">
-          <select value={agent} onChange={(event) => setAgent(event.target.value)} className={selectClass} aria-label="Agent">
-            {agents.length === 0 && <option value="">agent…</option>}
-            {agents.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <select value={model} onChange={(event) => setModel(event.target.value)} className={selectClass} aria-label="Model">
-            {modelOptions.length === 0 && <option value="">model…</option>}
-            {modelOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <SearchSelect
+            value={agent}
+            options={agents.map((item) => ({ value: item.name, label: item.name }))}
+            onChange={setAgent}
+            ariaLabel="Agent"
+            placeholder="agent…"
+          />
+          <SearchSelect
+            value={model}
+            options={modelOptions.map((option) => ({ value: option.value, label: option.label }))}
+            onChange={setModel}
+            ariaLabel="Model"
+            placeholder="model…"
+          />
           {variants.length > 0 && (
-            <select
+            <SearchSelect
               value={variant}
-              onChange={(event) => setVariant(event.target.value)}
-              className={selectClass}
-              aria-label="Effort"
-            >
-              <option value="">Effort: default</option>
-              {variants.map((key) => (
-                <option key={key} value={key}>
-                  Effort: {variantLabel(key)}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "Effort: default" },
+                ...variants.map((key) => ({ value: key, label: `Effort: ${variantLabel(key)}` })),
+              ]}
+              onChange={setVariant}
+              ariaLabel="Effort"
+              placeholder="Effort: default"
+            />
           )}
         </div>
 
