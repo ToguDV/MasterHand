@@ -9,6 +9,6 @@ fi
 
 echo "[pre-push] typecheck + unit tests + E2E + builds"
 npm run typecheck
-npm test
+npm run test:coverage
 npm run test:e2e
 npm run build

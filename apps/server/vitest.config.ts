@@ -5,5 +5,17 @@ export default defineConfig({
     environment: "node",
     include: ["test/**/*.test.ts"],
     testTimeout: 15000,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["src/**/*.ts"],
+      exclude: ["src/index.ts"],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 80,
+        statements: 80,
+      },
+    },
   },
 })
