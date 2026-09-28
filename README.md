@@ -28,6 +28,7 @@ npm run dev:web       # opencode + BFF (:8787) + web (:5173)
 npm run dev:desktop   # opencode + BFF + Electron shell
 npm run dev:mobile    # opencode + BFF + Expo dev server
 npm run dev:server    # opencode + BFF only
+npm run dev:stop      # stop any dev process left running (see below)
 
 npm test              # tests (vitest: BFF + client-core)
 npm run test:e2e      # E2E (Playwright + mocked opencode); run `npm run e2e:browsers` once
@@ -38,6 +39,12 @@ npm run test:e2e      # E2E (Playwright + mocked opencode); run `npm run e2e:bro
 - loads `apps/server/.env.local` (shipped with `COOKIE_SECURE=false` and `OPENCODE_URL=http://127.0.0.1:4096`);
 - starts `opencode serve` on the `OPENCODE_URL` host/port, **unless** it is already listening — so it will not fight a running instance; set `MASTERHAND_SKIP_OPENCODE=1` to always reuse an external one;
 - starts the BFF (`:8787`) and the requested front end, and stops the whole group when any process exits or on `Ctrl+C`.
+
+`Ctrl+C` stops what the current run started. If something survives — typically an `opencode serve` reused from an earlier run, or a process orphaned when a terminal was closed — stop it with:
+
+```bash
+npm run dev:stop   # kills the dev orchestrator, BFF/tsx, Vite and opencode listeners
+```
 
 If `opencode` is not on your `PATH`, install it first (`npm install -g opencode-ai`, or see https://opencode.ai/docs/).
 

@@ -126,6 +126,8 @@ async function main() {
     const extra = process.argv.slice(3)
     spawnChild(target, npm, ["run", ...front, ...(extra.length ? ["--", ...extra] : [])])
   }
+
+  console.log("[dev] Ctrl+C stops this run; if a reused/leftover process survives, run: npm run dev:stop")
 }
 
 process.on("SIGINT", () => shutdown(0))
