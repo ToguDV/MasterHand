@@ -15,10 +15,10 @@
     "react-native": "0.86.3"
   },
   "scripts": {
-    "dev:server": "npm run dev -w @masterhand/server",
-    "dev:web": "npm run dev -w @masterhand/web",
-    "dev:desktop": "npm run dev -w @masterhand/desktop",
-    "dev:mobile": "npm run start -w @masterhand/mobile",
+    "dev:server": "node scripts/dev.mjs server",
+    "dev:web": "node scripts/dev.mjs web",
+    "dev:desktop": "node scripts/dev.mjs desktop",
+    "dev:mobile": "node scripts/dev.mjs mobile",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
