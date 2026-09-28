@@ -8,8 +8,8 @@ Project status: what is done, in progress, pending, and the changelog. Updated *
 
 | Field | Value |
 |---|---|
-| Current phase | Phase 3 completed; next: Phase 4 (public release polish) + device testing |
-| Code | BFF (cookie + device tokens), web, Electron shell and React Native app; 147 unit tests with an 80% coverage gate + 2 E2E green; Docker image built and smoke-tested; mobile bundle exported with Metro |
+| Current phase | Phase 3 completed. Deployment artifacts verified ready to launch. Phase 4 (public release polish) deferred; Phase 5 (host deployment/hardening) intentionally out of scope |
+| Code | BFF (cookie + device tokens), web, Electron shell and React Native app; 147 unit tests with an 80% coverage gate + 2 E2E green; Docker Compose stack re-verified (build, health, opencode auth) and smoke-tested; mobile bundle exported with Metro |
 | Workflow | Git hooks (typecheck/unit on commit, full gate on push), Playwright E2E with a mocked opencode, GitHub Actions CI and PR template. See `WORKFLOW.md` |
 | Documentation | Full English baseline ✅; `docs/bff/api.md` and `docs/runbooks/deployment.md` updated to the multi-platform design |
 | Current blocker | None. Real-device verification (iOS/Android) and Electron packaging require a local GUI environment |
@@ -76,7 +76,9 @@ Project status: what is done, in progress, pending, and the changelog. Updated *
 - [x] Coverage: vitest v8 with an 80% threshold (lines/statements/branches/functions) on `apps/server` and `packages/client-core`; `npm run test:coverage`; enforced in hooks and CI with `lcov` artifacts
 - [x] Filled test gaps: `parseSseStream`, `EventHub`, `config`, token/rate-limiter units, `client` error paths, `createEventHandler`/`invalidateOnReconnect`, chat message helpers, and React query hooks via `renderHook` (RTL + jsdom, `client-core` only)
 
-## Phase 4 — Open-source readiness — 🟡 In progress
+## Phase 4 — Open-source readiness — ⏸️ Deferred
+
+Deferred by the maintainer; revisit before a public release.
 
 - [x] MIT license (`ToguDV`), `CONTRIBUTING.md` with Conventional Commits
 - [x] Hardcoded domain and bundled Caddy removed from docs, deploy and env files
@@ -84,13 +86,19 @@ Project status: what is done, in progress, pending, and the changelog. Updated *
 - [x] Workflow, git hooks, E2E harness and CI (`.github/workflows/ci.yml`)
 - [ ] First public release: versioning, screenshots, issue/PR templates (PR template done)
 
-## Phase 5 — Deployment + hardening — ⬜ Pending
+## Phase 5 — Deployment + hardening — 🚫 Out of scope
 
-- [ ] Documented host hardening and reverse-proxy examples (runbook exists)
-- [ ] Restrictive agent permissions in `opencode.json` (`bash: ask`)
-- [ ] Scheduled backups of volumes (`masterhand_data`, `opencode_data`, `opencode_config`)
-- [ ] Upgrade plan: pinned opencode, `docker compose build && docker compose up -d`
-- [ ] **Verification:** external scan (only the proxy port + SSH) + end-to-end demo from a mobile network (`SPEC.md` §8)
+Running the actual host and hardening it is deliberately **not** part of this
+project: whoever deploys it decides provider, TLS and hardening. The repo only
+needs to be **deploy-ready**, which is done (Docker Compose stack + deployment
+runbook, both verified). These items stay as a checklist for the deployer, not
+as project tasks:
+
+- [x] Documented reverse-proxy/TLS examples and host checklist (runbook exists)
+- [ ] Deployer: restrictive agent permissions in `opencode.json` (`bash: ask`)
+- [ ] Deployer: scheduled backups of volumes (`masterhand_data`, `opencode_data`, `opencode_config`)
+- [ ] Deployer: upgrade plan (pinned opencode, `docker compose build && docker compose up -d`)
+- [ ] Deployer: external scan (only the proxy port + SSH) + end-to-end demo from a mobile network (`SPEC.md` §8)
 
 ## Open decisions
 
@@ -122,4 +130,5 @@ None blocking. Resolved: **npm workspaces**, session/device token TTL configurab
 - **2026-09-27** — **Workflow, testing infrastructure and CI.** Defined `WORKFLOW.md` (one feature per branch/PR, gates, squash merge to `main`). Added native git hooks under `.githooks` (`pre-commit`: typecheck + unit; `commit-msg`: Conventional Commits; `pre-push`: full gate) activated by the npm `prepare` script. Created the `e2e/` workspace with Playwright, a typed `mock-opencode.ts` and specs for invalid login and the full chat/permission flow (2 E2E green). Added GitHub Actions CI (typecheck + unit + E2E + build), a PR template and a root `test:e2e` script; translated `.gitignore` to English.
 - **2026-09-28** — **Single-command dev stack.** Added `scripts/dev.mjs` and rewired `npm run dev:server|web|desktop|mobile` so each starts `opencode serve` (skipped when the port is already listening; `MASTERHAND_SKIP_OPENCODE=1` to force-reuse), the BFF and the requested front end together, stopping the whole group on exit or `Ctrl+C` and forwarding extra args (`npm run dev:web -- --host`). Updated `README.md` and `AGENTS.md`.
 - **2026-09-28** — **Unified development and deployment environments.** Added `apps/server/.env.example` and made `npm run dev:server` load `apps/server/.env.local` automatically (`tsx watch --env-file-if-exists`). The README now separates the source-based development quick start from the Docker deployment and states that `deploy/.env` is only consumed by Docker Compose (the BFF host `opencode:4096` does not exist in development).
+- **2026-09-28** — **Deploy readiness verified.** End-to-end `docker compose` smoke test on the stack: build, `GET /api/health`, opencode basic-auth enforcement (`401` without creds, `200` with) and persistence. Fixed two real deploy bugs: (1) `opencode.Dockerfile` now creates and `chown`s `/home/node/.config/opencode` and `/home/node/.local/share/opencode` so Docker initializes the named volumes as `node` (previously `auth login` and normal operation failed with `EACCES`); (2) removed `env_file: .env` from the opencode service so BFF secrets (`MASTERHAND_PASSWORD`, `SESSION_SECRET`) no longer leak into the opencode container — it now receives only `OPENCODE_SERVER_PASSWORD`/`OPENCODE_SERVER_USERNAME`. Phase 5 (host deployment/hardening) recorded as out of scope and Phase 4 (public release polish) deferred; the repo stays deploy-ready.
 - **2026-09-27** — **Coverage gate and test hardening.** Added `@vitest/coverage-v8` to `apps/server` and `packages/client-core` with an 80% threshold on lines/statements/branches/functions, plus `test:coverage` scripts (root + workspaces) and a CI/hook gate that uploads `lcov` artifacts. Scope excludes entry points and type-only modules; `apps/web`/`mobile`/`desktop` stay out of the metric (covered by E2E). New tests: SSE parser (`parseSseStream`, both copies), `EventHub` (reconnect/backoff/listeners/auth header), `loadConfig`, token/rate-limiter units, `/api/status` health, device-body and origin edge cases, the full `client` route map plus network/error paths, `createEventHandler`/`invalidateOnReconnect`, chat helpers (`messageText`, `isStreaming`, `hasVisibleParts`, `toolTitle`, `formatRelative`), and the React query hooks via `@testing-library/react` `renderHook` under jsdom (adopted for hooks only). Server 96.3/92.8/100/97.8, client-core 98.8/87.7/100/100. 147 unit tests + 2 E2E green.
