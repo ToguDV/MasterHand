@@ -94,9 +94,19 @@ function appendPart(sessionID: string, entry: ConversationEntry, part: Part): vo
   broadcast({ type: "message.part.updated", properties: { part: { ...part } } })
 }
 
-async function runPrompt(sessionID: string, text: string): Promise<void> {
+async function runPrompt(sessionID: string, text: string, body: Record<string, unknown> = {}): Promise<void> {
   const conversation = conversations.get(sessionID)
   if (!conversation) return
+
+  const session = sessions.get(sessionID)
+  const model = body.model as { providerID?: string; modelID?: string } | undefined
+  if (session && model?.providerID && model.modelID) {
+    session.model = {
+      providerID: model.providerID,
+      id: model.modelID,
+      ...(typeof body.variant === "string" ? { variant: body.variant } : {}),
+    }
+  }
 
   broadcast({ type: "session.status", properties: { sessionID, status: { type: "busy" } } })
 
@@ -236,7 +246,7 @@ const server = createServer((req, res) => {
         const parts = Array.isArray(body.parts) ? (body.parts as Array<{ text?: string }>) : []
         res.writeHead(204)
         res.end()
-        void runPrompt(sessionID, parts[0]?.text ?? "hello")
+        void runPrompt(sessionID, parts[0]?.text ?? "hello", body)
         return
       }
       if (req.method === "POST" && segments[2] === "abort") return json(res, 200, true)

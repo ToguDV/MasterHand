@@ -25,3 +25,24 @@ test("limits model options and searches the rest", async ({ page }) => {
   await expect(modelButton).toContainText("Other · Flash")
   await expect(listbox).toBeHidden()
 })
+
+test("remembers the last used model for new sessions", async ({ page }) => {
+  await page.goto("/")
+  await page.locator("#password").fill("e2e-password")
+  await page.getByRole("button", { name: "Sign in" }).click()
+  await page.getByRole("button", { name: "+ New" }).click()
+
+  const modelButton = page.getByRole("button", { name: "Model", exact: true })
+  await modelButton.click()
+  await page.getByRole("textbox", { name: "Search model" }).fill("flash")
+  await page.getByRole("listbox", { name: "Model" }).getByRole("option", { name: "Other · Flash" }).click()
+  await expect(modelButton).toContainText("Other · Flash")
+
+  await page.getByPlaceholder("Write a message…").fill("hello agent")
+  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Once" }).click()
+  await expect(page.getByText("Done!")).toBeVisible()
+
+  await page.getByRole("button", { name: "+ New" }).click()
+  await expect(page.getByRole("button", { name: "Model", exact: true })).toContainText("Other · Flash")
+})

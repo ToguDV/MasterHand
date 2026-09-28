@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native"
 import {
   ApiError,
   defaultModelValue,
   flattenModels,
   parseModel,
+  recentModelValue,
   selectableAgents,
+  sessionModelValue,
   useAgents,
   useConfig,
   useProviders,
+  useSessions,
   variantLabel,
   type Client,
 } from "@masterhand/client-core"
@@ -29,13 +32,16 @@ export function Composer({
   const agentsQuery = useAgents(client)
   const providersQuery = useProviders(client)
   const configQuery = useConfig(client)
+  const sessionsQuery = useSessions(client, true)
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
   const modelOptions = useMemo(() => flattenModels(providersQuery.data?.providers ?? []), [providersQuery.data])
-  const defaultModel = useMemo(
-    () => defaultModelValue(configQuery.data?.model, providersQuery.data?.default ?? {}, modelOptions),
-    [configQuery.data, providersQuery.data, modelOptions],
-  )
+  const defaultModel = useMemo(() => {
+    const sessions = sessionsQuery.data ?? []
+    const session = sessions.find((item) => item.id === sessionID)
+    const preferred = sessionModelValue(session, modelOptions) ?? recentModelValue(sessions, modelOptions)
+    return defaultModelValue(configQuery.data?.model, providersQuery.data?.default ?? {}, modelOptions, preferred)
+  }, [configQuery.data, providersQuery.data, modelOptions, sessionsQuery.data, sessionID])
 
   const [text, setText] = useState("")
   const [agent, setAgent] = useState("")
@@ -44,6 +50,7 @@ export function Composer({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [picker, setPicker] = useState<OpenPicker>(null)
+  const modelTouched = useRef(false)
 
   const variants = useMemo(
     () => modelOptions.find((option) => option.value === model)?.variants ?? [],
@@ -55,8 +62,8 @@ export function Composer({
   }, [agent, agents])
 
   useEffect(() => {
-    if (!model && defaultModel) setModel(defaultModel)
-  }, [defaultModel, model])
+    if (!modelTouched.current) setModel(defaultModel)
+  }, [defaultModel])
 
   useEffect(() => {
     if (variant && !variants.includes(variant)) setVariant("")
@@ -156,7 +163,10 @@ export function Composer({
         title="Model"
         options={modelChoices}
         selected={model}
-        onSelect={setModel}
+        onSelect={(value) => {
+          modelTouched.current = true
+          setModel(value)
+        }}
         onClose={() => setPicker(null)}
       />
       <ChoiceModal

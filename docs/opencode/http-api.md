@@ -74,6 +74,7 @@ Verified on **2026-09-27** against the [official server docs](https://opencode.a
 ## Integration notes
 
 - `prompt_async` replies `204` and progress arrives over SSE (`message.part.updated`) — the recommended UI flow.
+- Sessions persist the `model` (`{ providerID, id, variant? }`) and `agent` they last ran with, and `GET /session` returns them (verified on 1.18.32). MasterHand uses the most recently updated session to preselect the last used model. Note: the published SDK `Session` type does not declare these fields yet, so `client-core` augments it.
 - The `prompt` body accepts `{ messageID?, model?, agent?, noReply?, system?, tools?, variant?, parts }`; for text: `parts: [{ type: "text", text: "..." }]`.
 - `variant` is a string selecting a model variant (reasoning effort levels, e.g. `low`/`medium`/`high`/`xhigh`/`max`). Available variants per model come from `GET /config/providers` (`providers[].models[].variants`); the prompt also accepts `model.variant` in `POST /session`.
 - **Do not** use `--cors` in production: clients only talk to the BFF.

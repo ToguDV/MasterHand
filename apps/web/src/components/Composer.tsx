@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ApiError,
   defaultModelValue,
   flattenModels,
   parseModel,
+  recentModelValue,
   selectableAgents,
+  sessionModelValue,
   useAgents,
   useConfig,
   useProviders,
+  useSessions,
   variantLabel,
 } from "@masterhand/client-core"
 import { client } from "../client"
@@ -17,15 +20,18 @@ export function Composer({ sessionID, busy }: { sessionID: string; busy: boolean
   const agentsQuery = useAgents(client)
   const providersQuery = useProviders(client)
   const configQuery = useConfig(client)
+  const sessionsQuery = useSessions(client, true)
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
 
   const modelOptions = useMemo(() => flattenModels(providersQuery.data?.providers ?? []), [providersQuery.data])
 
-  const defaultModel = useMemo(
-    () => defaultModelValue(configQuery.data?.model, providersQuery.data?.default ?? {}, modelOptions),
-    [configQuery.data, providersQuery.data, modelOptions],
-  )
+  const defaultModel = useMemo(() => {
+    const sessions = sessionsQuery.data ?? []
+    const session = sessions.find((item) => item.id === sessionID)
+    const preferred = sessionModelValue(session, modelOptions) ?? recentModelValue(sessions, modelOptions)
+    return defaultModelValue(configQuery.data?.model, providersQuery.data?.default ?? {}, modelOptions, preferred)
+  }, [configQuery.data, providersQuery.data, modelOptions, sessionsQuery.data, sessionID])
 
   const [text, setText] = useState("")
   const [agent, setAgent] = useState("")
@@ -33,6 +39,7 @@ export function Composer({ sessionID, busy }: { sessionID: string; busy: boolean
   const [variant, setVariant] = useState("")
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const modelTouched = useRef(false)
 
   const variants = useMemo(
     () => modelOptions.find((option) => option.value === model)?.variants ?? [],
@@ -44,8 +51,8 @@ export function Composer({ sessionID, busy }: { sessionID: string; busy: boolean
   }, [agent, agents])
 
   useEffect(() => {
-    if (!model && defaultModel) setModel(defaultModel)
-  }, [defaultModel, model])
+    if (!modelTouched.current) setModel(defaultModel)
+  }, [defaultModel])
 
   useEffect(() => {
     if (variant && !variants.includes(variant)) setVariant("")
@@ -94,7 +101,10 @@ export function Composer({ sessionID, busy }: { sessionID: string; busy: boolean
           <SearchSelect
             value={model}
             options={modelOptions.map((option) => ({ value: option.value, label: option.label }))}
-            onChange={setModel}
+            onChange={(value) => {
+              modelTouched.current = true
+              setModel(value)
+            }}
             ariaLabel="Model"
             placeholder="model…"
           />
