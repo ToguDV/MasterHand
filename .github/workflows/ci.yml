@@ -31,14 +31,22 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests and coverage
+        run: npm run test:coverage
 
       - name: End-to-end tests
         run: npm run test:e2e
 
       - name: Build
         run: npm run build
+
+      - name: Upload coverage on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: "**/coverage/lcov.info"
+          retention-days: 7
 
       - name: Upload E2E results on failure
         if: failure()

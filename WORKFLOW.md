@@ -8,6 +8,7 @@ How we develop, test and merge. Commit format details live in `CONTRIBUTING.md`.
 2. **Tests are part of the feature**, not a follow-up: unit tests for logic, end-to-end tests for user flows.
 3. **Nothing is committed or merged while a gate is red.** `main` is always green.
 4. **Squash merge** into `main`: one clean commit per feature.
+5. **Finishing means shipping**: an agent that completes a task creates the branch, commits, pushes and opens the PR on its own. Do **not** ask for permission first; only stop to ask when the user explicitly requested a plan or a review with no changes.
 
 ## Branch model
 
@@ -21,8 +22,8 @@ How we develop, test and merge. Commit format details live in `CONTRIBUTING.md`.
 ```bash
 git switch -c feat/my-feature
 # implement the feature and its tests
-npm test              # unit (fast feedback)
-npm run test:e2e      # end-to-end
+npm run test:coverage  # unit + coverage thresholds (fast feedback)
+npm run test:e2e       # end-to-end
 git add -A
 git commit -m "feat(web): add my feature"   # pre-commit + commit-msg hooks run
 git push                                    # pre-push hook runs the full gate
@@ -33,10 +34,10 @@ git push                                    # pre-push hook runs the full gate
 
 | Gate | Runs | Purpose |
 |---|---|---|
-| `pre-commit` (`.githooks/pre-commit`) | `npm run typecheck` + `npm test` | Fast: never commit broken types or failing unit tests |
+| `pre-commit` (`.githooks/pre-commit`) | `npm run typecheck` + `npm run test:coverage` | Fast: never commit broken types, failing unit tests or uncovered code |
 | `commit-msg` (`.githooks/commit-msg`) | Conventional Commits check | Keep an English, standard history |
-| `pre-push` (`.githooks/pre-push`) | typecheck + unit + E2E + builds | Full local mirror of CI before sharing the branch |
-| GitHub Actions (`.github/workflows/ci.yml`) | typecheck + unit + E2E + build | Required check on every PR to `main` |
+| `pre-push` (`.githooks/pre-push`) | typecheck + unit/coverage + E2E + builds | Full local mirror of CI before sharing the branch |
+| GitHub Actions (`.github/workflows/ci.yml`) | typecheck + unit/coverage + E2E + build | Required check on every PR to `main` |
 
 Emergency bypass (use sparingly, never for `main`): `MASTERHAND_SKIP_HOOKS=1 git commit ...`.
 
@@ -52,6 +53,14 @@ npm run e2e:browsers     # downloads the Chromium used by Playwright
 - Locations: `apps/server/test` and `packages/client-core/test` (vitest).
 - Run all: `npm test`. Watch a workspace: `npm run test:watch -w @masterhand/server`.
 
+## Coverage gate
+
+- Run: `npm run test:coverage` (vitest v8, `lcov` + `text`).
+- Enforced with an **80% threshold** on lines, statements, branches and functions in `apps/server` and `packages/client-core` (the two libraries with tests). `apps/web`, `mobile`, `desktop` and `e2e` are out of scope: their UI/flows are validated by E2E, not by a percentage.
+- Entry points (`src/index.ts`) and type-only modules (`src/types.ts`) are excluded; there is no other exclusion.
+- React hooks in `client-core` are tested with `@testing-library/react` (`renderHook`) under a jsdom environment; the rest of that package is plain Node.
+- CI and the git hooks fail when a threshold is not met; the `lcov` report is uploaded as an artifact on failure.
+
 ## End-to-end tests
 
 - Workspace `e2e/`, built with [Playwright](https://playwright.dev).
@@ -61,9 +70,21 @@ npm run e2e:browsers     # downloads the Chromium used by Playwright
 - Coverage today: invalid login and the full flow login → new session → prompt → live stream → permission approval.
 - Add one spec under `e2e/tests/` per user-facing flow.
 
+## Finishing a task
+
+When the implementation and its tests are done and the gates are green, **ship it without asking**:
+
+1. `git switch -c <prefix>/<slug>` from an up-to-date `main`.
+2. Check `git status` / `git diff`: stage only the intended files, one feature per branch. Do not commit unrelated changes, secrets or generated artifacts.
+3. Commit with a Conventional Commits message in English (the hooks will run the fast gate).
+4. `git push -u origin <branch>` (the `pre-push` hook runs the full gate).
+5. Open the PR against `main` with `gh pr create`, filling `.github/pull_request_template.md`, and return the PR URL.
+
+Only skip this when the user explicitly asked for a plan, an analysis or a review with no changes.
+
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR and push to `main`: install, typecheck, unit, E2E and build. E2E artifacts are uploaded on failure. A red check blocks the merge.
+`.github/workflows/ci.yml` runs on every PR and push to `main`: install, typecheck, unit + coverage, E2E and build. Coverage and E2E artifacts are uploaded on failure. A red check blocks the merge.
 
 ## Pull requests
 
@@ -79,6 +100,6 @@ npm run e2e:browsers     # downloads the Chromium used by Playwright
 
 - [ ] One feature, no unrelated changes.
 - [ ] Unit tests cover the new logic; E2E covers the user flow.
-- [ ] `npm run typecheck`, `npm test`, `npm run test:e2e` and `npm run build` pass.
+- [ ] `npm run typecheck`, `npm run test:coverage`, `npm run test:e2e` and `npm run build` pass.
 - [ ] `PROGRESS.md` and the affected docs are updated.
 - [ ] PR approved and squash-merged into `main`.

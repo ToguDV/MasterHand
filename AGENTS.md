@@ -24,7 +24,8 @@
 2. Every new document is indexed in `docs/README.md` and in the table above.
 3. Relevant technical decisions are recorded in `ARCHITECTURE.md` (Decisions section).
 4. Do not document APIs "from memory": verify against the server OpenAPI (`/doc`) or `types.generated.ts`.
-5. Before finishing a task, run the gates (`npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run build`) and follow `WORKFLOW.md`.
+5. Before finishing a task, run the gates (`npm run typecheck`, `npm run test:coverage`, `npm run test:e2e`, `npm run build`) and follow `WORKFLOW.md`.
+6. Finishing a task **includes shipping it**: create the branch, commit, push and open the PR **without asking** (see `WORKFLOW.md` §"Finishing a task"). Asking first is only correct when the user explicitly asked for a plan/review only.
 
 ## Repository layout (target)
 
@@ -77,6 +78,22 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - Clients **never** talk to `opencode serve` directly: everything goes through the BFF (see `ARCHITECTURE.md`).
 - Never commit secrets or API keys; use `.env` (git-ignored).
 - The opencode password (`OPENCODE_SERVER_PASSWORD`) lives only in the deploy host's `.env`, never in client code.
+
+## Code minimalism (YAGNI ladder)
+
+Build the least that satisfies the task. After reading the code the change touches and tracing the real flow, stop at the first rung that holds:
+
+1. Does this need to exist? → no: skip it.
+2. Already in this repo? → reuse it, don't rewrite.
+3. Stdlib/runtime does it? → use it.
+4. Native platform feature? → use it (e.g. `<input type="date">`, not a date-picker library).
+5. Already-installed dependency? → use it.
+6. One line? → one line.
+7. Only then: the minimum that works.
+
+Lazy about the solution, never about reading. This ladder **never** trims trust-boundary validation, error handling, security, accessibility, or data-loss handling.
+
+It does **not** override deliberate architectural decisions: anything already justified in `SPEC.md` or `ARCHITECTURE.md` (BFF, `client-core`, device tokens, SQLite store, etc.) is out of scope for "do we need this?".
 
 ## External references
 

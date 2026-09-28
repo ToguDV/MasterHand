@@ -21,6 +21,7 @@
     "dev:mobile": "npm run start -w @masterhand/mobile",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
     "test:e2e": "npm run test:e2e -w @masterhand/e2e",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "e2e:browsers": "npm run e2e:browsers -w @masterhand/e2e",

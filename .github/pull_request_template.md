@@ -16,7 +16,7 @@
 
 - [ ] One feature only (no unrelated changes)
 - [ ] `npm run typecheck` passes
-- [ ] `npm test` passes (unit)
+- [ ] `npm run test:coverage` passes (unit + 80% coverage gate)
 - [ ] `npm run test:e2e` passes (E2E)
 - [ ] `npm run build` passes
 - [ ] Docs updated (`README.md`, `ARCHITECTURE.md`, `PROGRESS.md`, `docs/`)

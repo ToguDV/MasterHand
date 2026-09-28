@@ -155,6 +155,7 @@ deploy/
 | ADR-7 | Shared `packages/client-core` + per-platform UI | Reuses API/query/SSE logic without coupling to a rendering layer | One UI via React Native Web (rewrite + DOM limitations), fully independent clients (duplication) |
 | ADR-8 | Bearer tokens for native clients, cookie for web | React Native does not handle cookies like a browser; tokens enable revocable multi-device access | Cookie-only (fragile on native), token-only everywhere (loses HttpOnly/CSRF benefits on web) |
 | ADR-9 | In-app SSE notifications for the MVP; native push deferred | No APNs/FCM accounts or extra infrastructure required | Native push now (cost), Web Push (implies service worker / PWA) |
+| ADR-10 | Adopt the YAGNI ladder as a written guideline in `AGENTS.md`; do not install the third-party `ponytail` plugin | Keeps the minimalism principle without an always-on external prompt that would fight documented decisions or alter subagent behavior | Installing the `ponytail` plugin (third-party supply chain, injects rules into every turn and subagent, conflicts with the spec-driven approach) |
 
 ## 8. Risks
 
