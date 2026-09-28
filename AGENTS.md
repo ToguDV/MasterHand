@@ -54,10 +54,12 @@ MasterHand/
 ```bash
 npm install            # install the whole monorepo (npm workspaces)
 
-npm run dev:server     # BFF in development (:8787, tsx watch)
-npm run dev:web        # web app in development (:5173, proxies /api → :8787)
-npm run dev:desktop    # Electron shell (MASTERHAND_URL, default http://localhost:8787)
-npm run dev:mobile     # Expo dev server for iOS/Android
+npm run dev:server     # opencode serve + BFF in development (:8787, tsx watch)
+npm run dev:web        # the above + web app (:5173, proxies /api → :8787)
+npm run dev:desktop    # the above + Electron shell (MASTERHAND_URL default http://localhost:8787)
+npm run dev:mobile     # the above + Expo dev server for iOS/Android
+# Each `dev:*` command is self-contained (scripts/dev.mjs); it skips starting
+# opencode when one is already listening and honors MASTERHAND_SKIP_OPENCODE=1.
 
 npm run typecheck      # tsc across all workspaces
 npm test               # vitest (server + client-core)
