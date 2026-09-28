@@ -10,7 +10,8 @@ RUN apt-get update \
   && npm install -g opencode-ai@${OPENCODE_VERSION} \
   && npm cache clean --force
 
-RUN mkdir -p /workspace && chown node:node /workspace
+RUN mkdir -p /workspace /home/node/.config/opencode /home/node/.local/share/opencode \
+  && chown -R node:node /workspace /home/node/.config /home/node/.local
 
 USER node
 WORKDIR /workspace

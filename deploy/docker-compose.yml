@@ -30,8 +30,11 @@ services:
       args:
         OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      # Only the opencode credentials are shared with this container; the BFF
+      # secrets (MASTERHAND_PASSWORD, SESSION_SECRET) stay out of it.
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set it in deploy/.env}
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-opencode}
     volumes:
       - opencode_config:/home/node/.config/opencode
       - opencode_data:/home/node/.local/share/opencode

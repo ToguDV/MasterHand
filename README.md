@@ -2,7 +2,7 @@
 
 Self-hosted server to use your [opencode](https://opencode.ai) agents from any device — web, desktop and mobile. Open source, single-user across multiple devices.
 
-> Status: Phase 3 completed (BFF + web + Electron + React Native). Next: public release polish and real-device testing. See `PROGRESS.md`.
+> Status: Phase 3 completed (BFF + web + Electron + React Native) and deploy-ready. Public release polish, host deployment and real-device testing are deferred. See `PROGRESS.md`.
 
 ## How it works
 
