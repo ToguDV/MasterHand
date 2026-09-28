@@ -22,7 +22,9 @@ export {
   defaultModelValue,
   flattenModels,
   parseModel,
+  recentModelValue,
   selectableAgents,
+  sessionModelValue,
   variantLabel,
   type FlatModelOption,
 } from "./models"

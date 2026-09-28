@@ -1,7 +1,6 @@
-import type { Agent, Message, Part, Provider, SessionStatus } from "@opencode-ai/sdk"
+import type { Agent, Message, Part, Provider, Session as OpenCodeSession, SessionStatus } from "@opencode-ai/sdk"
 
 export type {
-  Session,
   Message,
   UserMessage,
   AssistantMessage,
@@ -20,6 +19,22 @@ export type {
   Config,
   Project,
 } from "@opencode-ai/sdk"
+
+/**
+ * The model a session last ran with. opencode persists it per session and
+ * returns it from `GET /session`, but the published SDK types do not declare
+ * the field yet.
+ */
+export interface SessionModel {
+  id: string
+  providerID: string
+  variant?: string
+}
+
+export interface Session extends OpenCodeSession {
+  agent?: string
+  model?: SessionModel
+}
 
 export interface DeviceRecord {
   id: string
