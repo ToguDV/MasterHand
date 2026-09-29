@@ -78,6 +78,6 @@ curl -X POST https://your-origin.example/api/devices \
 | `PORT` | `8787` | BFF port |
 | `OPENCODE_URL` | `http://127.0.0.1:4096` | opencode upstream |
 | `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` | — / `opencode` | Basic auth to opencode |
-| `DATA_DIR` | `./data` | SQLite path (`/data` in Docker) |
-| `WORKSPACES_ROOT` | `./workspace` | Base directory where workspaces are created as subfolders. Point it at the same folder opencode sees (e.g. `/workspace` in Docker) |
+| `DATA_DIR` | `<repo-root>/data` | SQLite path (`/data` in Docker). Relative values resolve against the repo root |
+| `WORKSPACES_ROOT` | `<repo-root>/workspace` | Base directory where workspaces are created as subfolders. Point it at the same folder opencode sees (e.g. `/workspace` in Docker). Relative values resolve against the repo root |
 | `WEB_DIST` | `apps/web/dist` | Web build served by the BFF |

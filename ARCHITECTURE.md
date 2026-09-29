@@ -107,7 +107,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 
 ### 4.6 Workspaces (isolated project folders)
 
-- There is a single **workspaces root** (`WORKSPACES_ROOT`, default `./workspace`; `/workspace` in Docker), the folder opencode works in. Every **workspace** is a subfolder of it, tracked in the BFF (`workspaces` table in SQLite: `id`, `name`, `path`).
+- There is a single **workspaces root** (`WORKSPACES_ROOT`, default `<repo-root>/workspace`; `/workspace` in Docker), the folder opencode works in. Every **workspace** is a subfolder of it, tracked in the BFF (`workspaces` table in SQLite: `id`, `name`, `path`). Relative values are resolved against the repo root, so the path does not depend on the process `cwd`.
 - Clients only send a **name**; the BFF sanitizes it to a single path segment (no separators, traversal or leading dots), derives `<root>/<name>` and creates the folder with `mkdir -p`. The name and the folder are the same, so arbitrary absolute paths can never be registered and everything stays isolated under the root.
 - Clients pick a workspace; every opencode call carries its `path` as the `directory` override (query on GET, `x-opencode-directory` header on mutations). Sessions are therefore created in and listed for the selected folder.
 - Deleting a workspace forgets it in MasterHand. With `?deleteFiles=1` (a checkbox in the UI) the BFF also removes the folder and its files; it refuses (`403`) when the stored path lies outside the root. Deleting a session calls `DELETE /session/:id` with the workspace directory and removes its data.
