@@ -1,5 +1,8 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { normalizeWorkspacePath, workspaceName } from "../src/workspaces.js"
+import { normalizeWorkspacePath, workspaceName, workspacePathExists } from "../src/workspaces.js"
 
 describe("normalizeWorkspacePath", () => {
   it("accepts absolute paths and strips trailing slashes", () => {
@@ -32,5 +35,21 @@ describe("workspaceName", () => {
 
   it("falls back to the path for the filesystem root", () => {
     expect(workspaceName("/")).toBe("/")
+  })
+})
+
+describe("workspacePathExists", () => {
+  it("detects directories, files and missing paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "masterhand-ws-"))
+    try {
+      const sub = join(dir, "project")
+      mkdirSync(sub)
+      writeFileSync(join(dir, "file.txt"), "x")
+      expect(workspacePathExists(sub)).toBe(true)
+      expect(workspacePathExists(join(dir, "file.txt"))).toBe(false)
+      expect(workspacePathExists(join(dir, "missing"))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

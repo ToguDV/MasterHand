@@ -112,7 +112,9 @@ export interface TestApp {
   close(): Promise<void>
 }
 
-export async function startTestApp(options: { config?: Partial<Config> } = {}): Promise<TestApp> {
+export async function startTestApp(
+  options: { config?: Partial<Config>; pathExists?: (path: string) => boolean } = {},
+): Promise<TestApp> {
   const config = testConfig(options.config)
   const store = createMemoryStore()
   const hub = createEventHub({
@@ -121,7 +123,7 @@ export async function startTestApp(options: { config?: Partial<Config> } = {}): 
     reconnectBaseMs: 50,
     reconnectMaxMs: 200,
   })
-  const app = createApp({ config, store, hub })
+  const app = createApp({ config, store, hub, pathExists: options.pathExists ?? (() => true) })
   const server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" })
   await new Promise<void>((resolve) => server.once("listening", resolve))
   const address = server.address() as AddressInfo

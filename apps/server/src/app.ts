@@ -16,13 +16,15 @@ import type { Config } from "./config.js"
 import type { EventHub } from "./events.js"
 import { createOpencodeProxy } from "./proxy.js"
 import type { Store } from "./store.js"
-import { normalizeWorkspacePath, workspaceName } from "./workspaces.js"
+import { normalizeWorkspacePath, workspaceName, workspacePathExists } from "./workspaces.js"
 
 export interface AppDeps {
   config: Config
   store: Store
   hub: EventHub
   fetchImpl?: typeof fetch
+  /** Overridable for tests: whether a workspace directory exists. */
+  pathExists?: (path: string) => boolean
 }
 
 const KEEPALIVE_MS = 25_000
@@ -36,6 +38,7 @@ function clientIp(header: string | undefined): string {
 export function createApp(deps: AppDeps): Hono {
   const { config } = deps
   const fetchImpl = deps.fetchImpl ?? fetch
+  const pathExists = deps.pathExists ?? workspacePathExists
   const app = new Hono()
   const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5 })
 
@@ -178,6 +181,9 @@ export function createApp(deps: AppDeps): Hono {
       return result.error === "outside_root"
         ? c.json({ error: "outside_root" }, 403)
         : c.json({ error: "invalid_path" }, 400)
+    }
+    if (!pathExists(result.path)) {
+      return c.json({ error: "not_found" }, 404)
     }
     if (deps.store.getWorkspaceByPath(result.path)) {
       return c.json({ error: "already_exists" }, 409)

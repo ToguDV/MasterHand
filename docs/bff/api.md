@@ -38,7 +38,7 @@ Other rules:
 | `GET` | `/api/devices` | `{ devices: DeviceRecord[] }` | Lists registered devices |
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
 | `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Registered project folders, oldest first |
-| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "path": "/workspace/app", "name": "App" }`. `path` must be absolute; `name` defaults to the folder name. `400` invalid path, `403` outside `WORKSPACES_ROOT`, `409` already registered |
+| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "path": "/workspace/app", "name": "App" }`. `path` must be absolute, exist as a directory on the BFF filesystem and, when `WORKSPACES_ROOT` is set, live under it; `name` defaults to the folder name. `400` invalid path, `403` outside root, `404` folder not found, `409` already registered |
 | `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list. Files and opencode sessions are **not** deleted |
 
 `workspace` shape: `{ id, name, path, createdAt }`. Workspaces are a MasterHand-side registry: opencode has no project-deletion endpoint, so deleting a workspace only forgets it here.

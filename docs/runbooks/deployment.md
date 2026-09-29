@@ -28,7 +28,7 @@ Fill in `deploy/.env`:
 | `PROJECTS_ROOT` | Host directory mounted into opencode as `/workspace` (default `../projects`). Register its subfolders as workspaces from the UI |
 | `OPENCODE_VERSION` | Pinned opencode version |
 
-> **Workspaces:** from the UI you register project folders as workspaces. They must live under the projects root mounted into opencode (`/workspace` in the container, i.e. `PROJECTS_ROOT` on the host), enforced by the BFF's `WORKSPACES_ROOT`. Removing a workspace only forgets it in MasterHand; files and sessions are untouched.
+> **Workspaces:** from the UI you register project folders as workspaces. They must exist and live under the projects root mounted into opencode (`/workspace` in the container, i.e. `PROJECTS_ROOT` on the host), enforced by the BFF's `WORKSPACES_ROOT`. The BFF also mounts the projects root read-only (`${PROJECTS_ROOT}:/workspace:ro`) so it can verify that a path is a real directory before registering it. Removing a workspace only forgets it in MasterHand; files and sessions are untouched.
 
 ## 3. Start the stack
 

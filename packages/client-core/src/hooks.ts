@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react"
 import { useQuery, type QueryClient } from "@tanstack/react-query"
 import type { Client } from "./client"
 import { removeMessage, removePart, upsertMessage, upsertPart } from "./chat"
+import { opencodeErrorMessage } from "./errors"
 import type { Event, MessageWithPartsResponse, Permission, SessionStatuses } from "./types"
 
 export const queryKeys = {
@@ -87,7 +88,7 @@ export function useConfig(client: Client) {
 export interface EventHandlerCallbacks {
   onPermission?: (permission: Permission) => void
   onPermissionReplied?: (permissionID: string) => void
-  onSessionError?: () => void
+  onSessionError?: (message: string) => void
 }
 
 /** Applies an opencode event to the TanStack Query cache. Shared by every platform. */
@@ -154,9 +155,11 @@ export function createEventHandler(
       case "permission.replied":
         callbacks.onPermissionReplied?.(event.properties.permissionID)
         break
-      case "session.error":
-        callbacks.onSessionError?.()
+      case "session.error": {
+        const message = opencodeErrorMessage(event.properties.error)
+        if (message) callbacks.onSessionError?.(message)
         break
+      }
     }
   }
 }

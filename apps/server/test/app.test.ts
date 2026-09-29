@@ -149,6 +149,17 @@ describe("/api/workspaces", () => {
     expect(outside.status).toBe(403)
   })
 
+  it("rejects a path that does not exist", async () => {
+    app = await startTestApp({ pathExists: () => false })
+    const cookie = await login(app.url)
+    const response = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/missing" }),
+    })
+    expect(response.status).toBe(404)
+  })
+
   it("requires authentication", async () => {
     app = await startTestApp()
     const response = await fetch(`${app.url}/api/workspaces`)
