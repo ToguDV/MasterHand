@@ -10,7 +10,9 @@ import {
   useEventStream,
   useSessions,
   useSessionStatuses,
+  useWorkspaces,
   type Client,
+  type CreateWorkspaceInput,
   type Permission,
 } from "@masterhand/client-core"
 import { LoginScreen } from "./src/screens/LoginScreen"
@@ -23,12 +25,15 @@ import { colors } from "./src/theme"
 import {
   clearDevice,
   clearToken,
+  clearWorkspaceID,
   loadDevice,
   loadServerUrl,
   loadToken,
+  loadWorkspaceID,
   saveDevice,
   saveServerUrl,
   saveToken,
+  saveWorkspaceID,
 } from "./src/storage"
 
 const queryClient = new QueryClient({
@@ -112,7 +117,7 @@ function Root() {
       const device = await loadDevice().catch(() => null)
       if (device) await client.auth.revokeDevice(device.id).catch(() => {})
     }
-    await Promise.all([clearToken(), clearDevice()])
+    await Promise.all([clearToken(), clearDevice(), clearWorkspaceID()])
     tokenRef.current = null
     queryClient.clear()
     setToken(null)
@@ -142,13 +147,32 @@ function Root() {
 
 function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: () => void }) {
   const [sessionID, setSessionID] = useState<string | null>(null)
+  const [workspaceID, setWorkspaceID] = useState<string | null>(null)
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [responding, setResponding] = useState(false)
   const [connected, setConnected] = useState(false)
   const [creating, setCreating] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
 
-  const sessionsQuery = useSessions(client, true)
+  useEffect(() => {
+    void loadWorkspaceID().then(setWorkspaceID)
+  }, [])
+
+  const workspacesQuery = useWorkspaces(client, true)
+  const workspaces = workspacesQuery.data ?? []
+  const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
+  const directory = workspace?.path ?? null
+
+  useEffect(() => {
+    if (!workspacesQuery.data) return
+    if (workspaceID && workspacesQuery.data.some((item) => item.id === workspaceID)) return
+    const next = workspacesQuery.data[0]?.id ?? null
+    setWorkspaceID(next)
+    if (next) void saveWorkspaceID(next)
+    else void clearWorkspaceID()
+  }, [workspacesQuery.data, workspaceID])
+
+  const sessionsQuery = useSessions(client, true, 10_000, directory)
   const statusesQuery = useSessionStatuses(client, true, connected)
   const statuses = statusesQuery.data ?? {}
   const sessions = sessionsQuery.data ?? []
@@ -184,10 +208,14 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   }, [])
 
   async function createSession() {
+    if (!directory) {
+      setBanner("Add a workspace first")
+      return
+    }
     setCreating(true)
     setBanner(null)
     try {
-      const session = await client.api.createSession()
+      const session = await client.api.createSession(directory)
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
       setSessionID(session.id)
     } catch {
@@ -197,12 +225,47 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     }
   }
 
+  async function deleteSession(id: string) {
+    try {
+      await client.api.deleteSession(id, directory)
+      if (sessionID === id) setSessionID(null)
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+    } catch {
+      setBanner("Could not delete the session")
+    }
+  }
+
+  async function addWorkspace(input: CreateWorkspaceInput) {
+    const created = await client.workspaces.create(input)
+    await queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+    setWorkspaceID(created.id)
+    void saveWorkspaceID(created.id)
+  }
+
+  async function removeWorkspace(id: string) {
+    try {
+      await client.workspaces.remove(id)
+      if (workspaceID === id) {
+        setWorkspaceID(null)
+        void clearWorkspaceID()
+      }
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+    } catch {
+      setBanner("Could not remove the workspace")
+    }
+  }
+
+  function selectWorkspace(id: string) {
+    setWorkspaceID(id)
+    void saveWorkspaceID(id)
+  }
+
   async function respondPermission(response: "once" | "always" | "reject") {
     const permission = permissions[0]
     if (!permission) return
     setResponding(true)
     try {
-      await client.api.respondPermission(permission.sessionID, permission.id, response)
+      await client.api.respondPermission(permission.sessionID, permission.id, response, directory)
     } catch {
       setBanner("Could not answer the permission request")
     } finally {
@@ -220,6 +283,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           title={selected?.title ?? ""}
           busy={busy}
           connected={connected}
+          directory={directory}
           onBack={() => setSessionID(null)}
         />
       ) : (
@@ -230,9 +294,16 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           connected={connected}
           creating={creating}
           banner={banner}
+          workspaces={workspaces}
+          workspaceID={workspaceID}
+          canCreate={Boolean(directory)}
           onOpen={setSessionID}
           onNew={() => void createSession()}
           onSignOut={onSignOut}
+          onSelectWorkspace={selectWorkspace}
+          onAddWorkspace={addWorkspace}
+          onRemoveWorkspace={(id) => void removeWorkspace(id)}
+          onDeleteSession={(id) => void deleteSession(id)}
         />
       )}
 

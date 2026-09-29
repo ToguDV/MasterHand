@@ -12,6 +12,7 @@ export function ChatScreen({
   title,
   busy,
   connected,
+  directory,
   onBack,
 }: {
   client: Client
@@ -19,9 +20,10 @@ export function ChatScreen({
   title: string
   busy: boolean
   connected: boolean
+  directory?: string | null
   onBack: () => void
 }) {
-  const messagesQuery = useMessages(client, sessionID, { busy, connected })
+  const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
   const listRef = useRef<FlatList<MessageWithParts>>(null)
   const messages = messagesQuery.data ?? []
 
@@ -54,7 +56,7 @@ export function ChatScreen({
         renderItem={({ item }) => <MessageBubble entry={item} />}
       />
 
-      <Composer client={client} sessionID={sessionID} busy={busy} />
+      <Composer client={client} sessionID={sessionID} busy={busy} directory={directory} />
     </Screen>
   )
 }
