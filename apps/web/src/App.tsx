@@ -237,6 +237,7 @@ export default function App() {
   )
   const statuses = statusesQuery.data ?? {}
   const selected = sessions.find((session) => session.id === sessionID) ?? null
+  const parentSessionID = selected?.parentID ?? null
   const busy = sessionID ? statuses[sessionID]?.type === "busy" : false
 
   const handleLogout = useCallback(async () => {
@@ -388,7 +389,7 @@ export default function App() {
           />
         </aside>
 
-        <main className={`${sessionID ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
+        <main className={`${sessionID ? "flex" : "hidden md:flex"} relative min-w-0 flex-1 flex-col`}>
           {sessionID ? (
             <ChatView
               key={sessionID}
@@ -398,11 +399,22 @@ export default function App() {
               directory={directory}
               autoAccept={autoAcceptSessions.includes(sessionID)}
               onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
+              onOpenSession={openSession}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-zinc-500">
               Select a session or create a new one.
             </div>
+          )}
+
+          {sessionID && parentSessionID && (
+            <button
+              type="button"
+              onClick={() => openSession(parentSessionID)}
+              className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-indigo-500/40 bg-zinc-900/95 px-3 py-1.5 text-xs font-medium text-indigo-200 shadow-lg backdrop-blur hover:bg-zinc-800"
+            >
+              <span aria-hidden="true">←</span> Back to main agent
+            </button>
           )}
         </main>
       </div>

@@ -54,6 +54,18 @@ Verified union of part types:
 
 > All share `id`, `sessionID`, `messageID` and `type`. Specific fields (e.g. `TextPart.text`, `ToolPart` with state/input/output) should be documented here while implementing rendering, consulting `types.gen.ts`.
 
+### Subagents (`subtask` part and the `task` tool)
+
+Verified on **1.18.32** against the task tool source and the SDK types:
+
+- **`subtask` part**: `{ id, sessionID, messageID, type: "subtask", prompt, description, agent }` (also accepted as a prompt input part).
+- **`task` tool**: a regular `ToolPart` with `tool: "task"` where
+  - `state.input = { description, prompt, subagent_type, task_id?, command?, background? }`
+  - `state.title = description`
+  - `state.metadata = { parentSessionId, sessionId, model, background?, jobId? }`, with `sessionId` = the **child session** and `background: true` for asynchronous runs
+  - `state.output` is wrapped as `<task id state><summary>…</summary><task_result>…</task_result></task>` (or `<task_error>`).
+- The child session is returned by `GET /session` with `parentID` set (title `<description> (@<agent> subagent)`), so clients can drill into it.
+
 ### `Permission` (`permission.asked`)
 
 Verified on **1.18.32** (the version pinned in `deploy/.env`). The event was renamed from `permission.updated` and the payload changed; the published SDK still describes the old shape, so MasterHand models this one.

@@ -218,6 +218,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   const statuses = statusesQuery.data ?? {}
   const sessions = sessionsQuery.data ?? []
   const selected = sessions.find((session) => session.id === sessionID) ?? null
+  const parentSessionID = selected?.parentID ?? null
   const busy = sessionID ? statuses[sessionID]?.type === "busy" : false
 
   const handleEvent = useMemo(
@@ -376,6 +377,8 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           directory={directory}
           autoAccept={autoAcceptSessions.includes(sessionID)}
           onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
+          onOpenSession={setSessionID}
+          parentSessionID={parentSessionID}
           onBack={() => setSessionID(null)}
         />
       ) : (

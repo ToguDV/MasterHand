@@ -1,10 +1,14 @@
 import { useState } from "react"
 import { Pressable, StyleSheet, Text, View } from "react-native"
 import {
+  isTaskTool,
   splitFences,
+  subagentInfo,
+  subagentOutput,
   toolTitle,
   type MessageWithParts,
   type ReasoningPart,
+  type SubtaskPart,
   type TextPart,
   type ToolPart,
 } from "@masterhand/client-core"
@@ -41,22 +45,24 @@ function Reasoning({ text }: { text: string }) {
   )
 }
 
+function statusColor(status: ToolPart["state"]["status"]): string {
+  return status === "completed"
+    ? colors.success
+    : status === "error"
+      ? colors.danger
+      : status === "running"
+        ? colors.warning
+        : colors.muted
+}
+
 function Tool({ part }: { part: ToolPart }) {
   const [open, setOpen] = useState(false)
   const state = part.state
-  const statusColor =
-    state.status === "completed"
-      ? colors.success
-      : state.status === "error"
-        ? colors.danger
-        : state.status === "running"
-          ? colors.warning
-          : colors.muted
 
   return (
     <View style={styles.toolCard}>
       <Pressable style={styles.toolHeader} onPress={() => setOpen((value) => !value)}>
-        <View style={[styles.dot, { backgroundColor: statusColor }]} />
+        <View style={[styles.dot, { backgroundColor: statusColor(state.status) }]} />
         <Text style={styles.toolName}>{part.tool}</Text>
         <Text style={styles.toolTitle} numberOfLines={1}>
           {toolTitle(part)}
@@ -78,22 +84,99 @@ function Tool({ part }: { part: ToolPart }) {
   )
 }
 
-function PartView({ part }: { part: MessageWithParts["parts"][number] }) {
+function Subagent({ part, onOpenSession }: { part: ToolPart; onOpenSession?: (id: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const state = part.state
+  const info = subagentInfo(part)
+  const output = subagentOutput(part)
+
+  return (
+    <View style={styles.subagentCard}>
+      <Pressable style={styles.toolHeader} onPress={() => setOpen((value) => !value)}>
+        <View style={[styles.dot, { backgroundColor: statusColor(state.status) }]} />
+        <Text style={styles.subagentBadge}>SUBAGENT</Text>
+        <Text style={styles.subagentName} numberOfLines={1}>
+          {info.name}
+        </Text>
+        <Text style={styles.toolTitle} numberOfLines={1}>
+          {info.description}
+        </Text>
+        <Text style={styles.caption}>{state.status}</Text>
+      </Pressable>
+      {open && (
+        <View style={styles.toolBody}>
+          {info.prompt ? <Text style={styles.codeText}>{info.prompt}</Text> : null}
+          {output ? (
+            <Text style={[styles.codeText, styles.toolOutput]} numberOfLines={40}>
+              {output}
+            </Text>
+          ) : null}
+          {state.status === "error" ? <Text style={styles.errorText}>{state.error}</Text> : null}
+        </View>
+      )}
+      {info.sessionID && onOpenSession ? (
+        <Pressable style={styles.subagentOpen} onPress={() => onOpenSession(info.sessionID!)}>
+          <Text style={styles.subagentOpenText}>Open session →</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  )
+}
+
+function Subtask({ part }: { part: SubtaskPart }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <View style={styles.subagentCard}>
+      <Pressable style={styles.toolHeader} onPress={() => setOpen((value) => !value)}>
+        <Text style={styles.subagentBadge}>SUBAGENT</Text>
+        <Text style={styles.subagentName} numberOfLines={1}>
+          {part.agent}
+        </Text>
+        <Text style={styles.toolTitle} numberOfLines={1}>
+          {part.description}
+        </Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.toolBody}>
+          <Text style={styles.codeText}>{part.prompt}</Text>
+        </View>
+      ) : null}
+    </View>
+  )
+}
+
+function PartView({
+  part,
+  onOpenSession,
+}: {
+  part: MessageWithParts["parts"][number]
+  onOpenSession?: (id: string) => void
+}) {
   switch (part.type) {
     case "text":
       return <SegmentText text={(part as TextPart).text} />
     case "reasoning":
       return <Reasoning text={(part as ReasoningPart).text} />
     case "tool":
-      return <Tool part={part as ToolPart} />
+      return isTaskTool(part) ? (
+        <Subagent part={part} onOpenSession={onOpenSession} />
+      ) : (
+        <Tool part={part as ToolPart} />
+      )
     case "subtask":
-      return <Text style={styles.caption}>Subtask: {part.description}</Text>
+      return <Subtask part={part as SubtaskPart} />
     default:
       return null
   }
 }
 
-export function MessageBubble({ entry }: { entry: MessageWithParts }) {
+export function MessageBubble({
+  entry,
+  onOpenSession,
+}: {
+  entry: MessageWithParts
+  onOpenSession?: (id: string) => void
+}) {
   const info = entry.info
 
   if (info.role === "user") {
@@ -120,7 +203,7 @@ export function MessageBubble({ entry }: { entry: MessageWithParts }) {
   return (
     <View style={styles.assistantBlock}>
       {visible.map((part) => (
-        <PartView key={part.id} part={part} />
+        <PartView key={part.id} part={part} onOpenSession={onOpenSession} />
       ))}
       {streaming && visible.length === 0 ? <Text style={styles.caption}>Thinking…</Text> : null}
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
@@ -217,6 +300,35 @@ const styles = StyleSheet.create({
   },
   toolOutput: {
     maxHeight: 240,
+  },
+  subagentCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accentMuted,
+    borderRadius: 8,
+    backgroundColor: "rgba(99, 102, 241, 0.08)",
+    overflow: "hidden",
+  },
+  subagentBadge: {
+    color: "#a5b4fc",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  subagentName: {
+    color: "#a5b4fc",
+    fontFamily: "monospace",
+    fontSize: 12,
+  },
+  subagentOpen: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.accentMuted,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  subagentOpenText: {
+    color: "#a5b4fc",
+    fontSize: 12,
+    fontWeight: "600",
   },
   errorText: {
     color: colors.danger,
