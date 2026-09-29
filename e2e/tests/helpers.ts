@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { expect, type Page } from "@playwright/test"
 
 export async function login(page: Page): Promise<void> {
@@ -8,7 +11,8 @@ export async function login(page: Page): Promise<void> {
 }
 
 export async function addWorkspace(page: Page, path?: string): Promise<string> {
-  const workspacePath = path ?? `/e2e/project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  // The BFF validates that the folder exists, so E2E uses a real temp directory.
+  const workspacePath = path ?? mkdtempSync(join(tmpdir(), "mh-e2e-"))
   await page.getByRole("button", { name: "Add workspace" }).click()
   await page.getByPlaceholder("/workspace/my-project").fill(workspacePath)
   await page.getByRole("button", { name: "Add", exact: true }).click()

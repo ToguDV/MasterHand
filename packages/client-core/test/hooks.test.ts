@@ -120,8 +120,16 @@ describe("createEventHandler", () => {
     handler({ type: "permission.replied", properties: { permissionID: "per_1" } })
     expect(onPermissionReplied).toHaveBeenCalledWith("per_1")
 
-    handler({ type: "session.error", properties: {} })
-    expect(onSessionError).toHaveBeenCalledTimes(1)
+    handler({ type: "session.error", properties: { sessionID: "ses_1", error: { name: "UnknownError", data: { message: "boom\nstack" } } } })
+    expect(onSessionError).toHaveBeenCalledWith("boom")
+  })
+
+  it("ignores aborted turns", () => {
+    const { qc } = makeQueryClient()
+    const onSessionError = vi.fn()
+    const handler = createEventHandler(qc, { onSessionError })
+    handler({ type: "session.error", properties: { error: { name: "MessageAbortedError", data: { message: "aborted" } } } })
+    expect(onSessionError).not.toHaveBeenCalled()
   })
 
   it("ignores unknown event types", () => {

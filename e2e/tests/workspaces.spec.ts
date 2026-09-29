@@ -21,6 +21,14 @@ test("adds a workspace, deletes a session and removes the workspace", async ({ p
   await expect(page.getByRole("option", { name: workspaceName })).toHaveCount(0)
 })
 
+test("rejects a workspace path that does not exist", async ({ page }) => {
+  await login(page)
+  await page.getByRole("button", { name: "Add workspace" }).click()
+  await page.getByPlaceholder("/workspace/my-project").fill("/definitely/missing/mh-e2e")
+  await page.getByRole("button", { name: "Add", exact: true }).click()
+  await expect(page.getByText("That folder does not exist or is not accessible to opencode")).toBeVisible()
+})
+
 test("keeps sessions scoped to the selected workspace", async ({ page }) => {
   await login(page)
   const workspace = page.getByRole("combobox", { name: "Workspace", exact: true })

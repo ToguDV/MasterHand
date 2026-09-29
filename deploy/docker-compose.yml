@@ -17,6 +17,8 @@ services:
       WORKSPACES_ROOT: /workspace
     volumes:
       - masterhand_data:/data
+      # Read-only view of the projects root so the BFF can validate workspace paths.
+      - ${PROJECTS_ROOT:-../projects}:/workspace:ro
     ports:
       # Bind to 127.0.0.1 when your reverse proxy runs on the host.
       - "${MASTERHAND_BIND:-0.0.0.0}:${MASTERHAND_PORT:-8787}:8787"

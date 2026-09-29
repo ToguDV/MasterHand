@@ -1,8 +1,18 @@
 import { basename, resolve, sep } from "node:path"
+import { statSync } from "node:fs"
 
 export type WorkspacePathResult =
   | { ok: true; path: string }
   | { ok: false; error: "invalid_path" | "outside_root" }
+
+/** True when `path` is an existing directory visible to the BFF. */
+export function workspacePathExists(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
 
 /**
  * Normalizes a workspace path and, when a root is configured, ensures it lives

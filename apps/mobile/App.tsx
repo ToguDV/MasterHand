@@ -186,7 +186,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           setPermissions((prev) => (prev.some((item) => item.id === permission.id) ? prev : [...prev, permission])),
         onPermissionReplied: (permissionID) =>
           setPermissions((prev) => prev.filter((item) => item.id !== permissionID)),
-        onSessionError: () => setBanner("The agent reported an error in a session"),
+        onSessionError: (message) => setBanner(message),
       }),
     [],
   )

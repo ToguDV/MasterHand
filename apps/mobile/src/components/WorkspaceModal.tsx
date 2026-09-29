@@ -6,6 +6,7 @@ import { colors } from "../theme"
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 409) return "That workspace is already registered"
+    if (error.status === 404) return "That folder does not exist or is not accessible to opencode"
     if (error.status === 403) return "The path is outside the allowed projects root"
     if (error.status === 400) return "Enter an absolute path (starting with /)"
   }
