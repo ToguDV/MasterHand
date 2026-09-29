@@ -27,5 +27,6 @@ test("login, create a session, stream a reply and approve a permission", async (
   await page.getByRole("button", { name: "Once" }).click()
 
   await expect(page.getByText("Done!")).toBeVisible()
+  await expect(page.getByText(/Session · \$0\.0010 · 1 tok/)).toBeVisible()
   await expect(page.getByText("Permission required")).toBeHidden()
 })

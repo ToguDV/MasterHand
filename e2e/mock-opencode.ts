@@ -149,7 +149,7 @@ async function runPrompt(sessionID: string, text: string, body: Record<string, u
       time: { created: now() },
       modelID: "test-model",
       providerID: "test",
-      cost: 0,
+      cost: 0.001,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
     parts: [],

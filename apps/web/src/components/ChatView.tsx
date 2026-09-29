@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { useMessages } from "@masterhand/client-core"
+import { sessionUsage, useMessages } from "@masterhand/client-core"
 import { client } from "../client"
 import { AssistantBlock, UserBubble } from "./MessageContent"
 import { Composer } from "./Composer"
@@ -18,6 +18,7 @@ export function ChatView({
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
 
   const messages = messagesQuery.data ?? []
+  const usage = sessionUsage(messages)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -56,6 +57,14 @@ export function ChatView({
           )}
         </div>
       </div>
+      {usage.cost > 0 && (
+        <div className="px-3 pt-2 md:px-6">
+          <p className="mx-auto w-full max-w-3xl text-right text-xs text-zinc-600">
+            Session · ${usage.cost.toFixed(4)}
+            {usage.tokens > 0 ? ` · ${usage.tokens} tok` : ""}
+          </p>
+        </div>
+      )}
       <Composer sessionID={sessionID} busy={busy} directory={directory} />
     </div>
   )
