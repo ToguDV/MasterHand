@@ -8,6 +8,7 @@ export interface StoredDevice {
 const SERVER_URL_KEY = "masterhand.serverUrl"
 const TOKEN_KEY = "masterhand.token"
 const DEVICE_KEY = "masterhand.device"
+const WORKSPACE_KEY = "masterhand.workspaceID"
 
 export function loadServerUrl(): Promise<string | null> {
   return SecureStore.getItemAsync(SERVER_URL_KEY)
@@ -45,4 +46,16 @@ export function saveDevice(device: StoredDevice): Promise<void> {
 
 export function clearDevice(): Promise<void> {
   return SecureStore.deleteItemAsync(DEVICE_KEY)
+}
+
+export function loadWorkspaceID(): Promise<string | null> {
+  return SecureStore.getItemAsync(WORKSPACE_KEY)
+}
+
+export function saveWorkspaceID(id: string): Promise<void> {
+  return SecureStore.setItemAsync(WORKSPACE_KEY, id)
+}
+
+export function clearWorkspaceID(): Promise<void> {
+  return SecureStore.deleteItemAsync(WORKSPACE_KEY)
 }

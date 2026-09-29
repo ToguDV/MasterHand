@@ -24,15 +24,17 @@ export function Composer({
   client,
   sessionID,
   busy,
+  directory,
 }: {
   client: Client
   sessionID: string
   busy: boolean
+  directory?: string | null
 }) {
   const agentsQuery = useAgents(client)
   const providersQuery = useProviders(client)
   const configQuery = useConfig(client)
-  const sessionsQuery = useSessions(client, true)
+  const sessionsQuery = useSessions(client, true, 10_000, directory)
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
   const modelOptions = useMemo(() => flattenModels(providersQuery.data?.providers ?? []), [providersQuery.data])
@@ -76,12 +78,16 @@ export function Composer({
     setError(null)
     try {
       const modelValue = model ? parseModel(model) : undefined
-      await client.api.promptAsync(sessionID, {
-        parts: [{ type: "text", text: trimmed }],
-        ...(agent ? { agent } : {}),
-        ...(variant ? { variant } : {}),
-        ...(modelValue ? { model: modelValue } : {}),
-      })
+      await client.api.promptAsync(
+        sessionID,
+        {
+          parts: [{ type: "text", text: trimmed }],
+          ...(agent ? { agent } : {}),
+          ...(variant ? { variant } : {}),
+          ...(modelValue ? { model: modelValue } : {}),
+        },
+        directory,
+      )
       setText("")
     } catch (err) {
       setError(err instanceof ApiError ? `Could not send (HTTP ${err.status})` : "Could not send")
@@ -92,7 +98,7 @@ export function Composer({
 
   async function stop() {
     try {
-      await client.api.abortSession(sessionID)
+      await client.api.abortSession(sessionID, directory)
     } catch {
       // the state reconciles through events
     }

@@ -41,7 +41,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 |---|---|---|---|
 | Web client | `apps/web` | React 19 + Vite + TS + Tailwind | Browser UI: sessions, chat, streaming, permission modal |
 | Desktop client | `apps/desktop` | Electron (main process, hardened renderer) | Thin shell that loads the BFF-served web app (`MASTERHAND_URL`, default `http://localhost:8787`) with navigation locked to that origin |
-| Mobile client | `apps/mobile` | React Native + Expo | Native iOS/Android UI (login with device token, sessions, chat, permissions) |
+| Mobile client | `apps/mobile` | React Native + Expo | Native iOS/Android UI (login with device token, workspace picker, sessions with delete, chat, permissions) |
 | `packages/client-core` | TypeScript (framework-agnostic + React hooks) | API client, TanStack Query hooks, SSE handling, auth adapters, generated opencode types |
 | BFF | `apps/server` | Node 22 + Hono (`@hono/node-server`) | Auth (cookie + token), proxy to opencode, SSE relay, device/token storage, rate limit |
 | Agent engine | `opencode` container | `opencode serve` (pinned version) | Runs agents and tools; OpenAPI 3.1 + SSE; data on volumes |
