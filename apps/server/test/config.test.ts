@@ -1,6 +1,9 @@
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { loadConfig } from "../src/config.js"
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 
 function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return { MASTERHAND_PASSWORD: "pw", SESSION_SECRET: "secret", ...overrides }
@@ -31,7 +34,7 @@ describe("loadConfig", () => {
       sessionSecret: "secret",
       sessionTtlHours: 720,
       cookieSecure: true,
-      dataDir: "./data",
+      dataDir: resolve(repoRoot, "data"),
       webDist: "apps/web/dist",
     })
   })
@@ -70,10 +73,13 @@ describe("loadConfig", () => {
     expect(config.allowedOrigins.sort()).toEqual(["https://a.example", "https://b.example"])
   })
 
-  it("resolves the workspaces root with a repo-local default", () => {
-    expect(loadConfig(env()).workspacesRoot).toBe(resolve("./workspace"))
+  it("resolves data and workspaces roots against the repo root, not the cwd", () => {
+    expect(loadConfig(env()).dataDir).toBe(resolve(repoRoot, "data"))
+    expect(loadConfig(env()).workspacesRoot).toBe(resolve(repoRoot, "workspace"))
     expect(loadConfig(env({ WORKSPACES_ROOT: " /srv/workspaces " })).workspacesRoot).toBe("/srv/workspaces")
-    expect(loadConfig(env({ WORKSPACES_ROOT: "" })).workspacesRoot).toBe(resolve("./workspace"))
+    expect(loadConfig(env({ WORKSPACES_ROOT: "" })).workspacesRoot).toBe(resolve(repoRoot, "workspace"))
+    expect(loadConfig(env({ WORKSPACES_ROOT: "./custom" })).workspacesRoot).toBe(resolve(repoRoot, "custom"))
+    expect(loadConfig(env({ DATA_DIR: "/var/lib/masterhand" })).dataDir).toBe("/var/lib/masterhand")
   })
 
   it("adds the local dev origins outside production", () => {

@@ -1,4 +1,11 @@
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
+
+function fromRepoRoot(value: string | undefined, fallback: string): string {
+  return resolve(repoRoot, value?.trim() || fallback)
+}
 
 export interface Config {
   port: number
@@ -62,9 +69,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessionSecret,
     sessionTtlHours: intFromEnv(env.SESSION_TTL_HOURS, 720),
     cookieSecure: boolFromEnv(env.COOKIE_SECURE, true),
-    dataDir: env.DATA_DIR ?? "./data",
+    dataDir: fromRepoRoot(env.DATA_DIR, "data"),
     webDist: env.WEB_DIST === "" ? null : (env.WEB_DIST ?? "apps/web/dist"),
     allowedOrigins: [...allowedOrigins],
-    workspacesRoot: resolve(env.WORKSPACES_ROOT?.trim() || "./workspace"),
+    workspacesRoot: fromRepoRoot(env.WORKSPACES_ROOT, "workspace"),
   }
 }
