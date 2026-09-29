@@ -82,6 +82,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 3. The user answers → `POST /api/oc/session/:id/permissions/:permissionID` with `{ response }` (`once` / `always` / `reject`). The session id resolves the request, so no directory override is needed.
 4. opencode emits `permission.replied` (`{ sessionID, requestID, reply }`) and all devices sync.
 5. SSE does not replay across reconnects, so on (re)connect clients reconcile pending requests with `GET /api/oc/permission?directory=<workspace>` for every workspace; otherwise a missed `permission.asked` would leave the agent blocked with no UI.
+6. Optional per-session **auto-accept** (a toggle next to the composer, stored client-side): incoming requests for that session are answered `once` automatically and the queue is drained on (re)connect. It is reversible — `once` never persists a rule in opencode — and only affects sessions the user enabled it for.
 
 ### 4.3 Authentication (single user, multiple devices)
 

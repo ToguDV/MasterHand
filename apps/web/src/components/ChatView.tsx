@@ -9,11 +9,15 @@ export function ChatView({
   busy,
   connected,
   directory,
+  autoAccept,
+  onToggleAutoAccept,
 }: {
   sessionID: string
   busy: boolean
   connected: boolean
   directory?: string | null
+  autoAccept: boolean
+  onToggleAutoAccept: (on: boolean) => void
 }) {
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
 
@@ -65,7 +69,13 @@ export function ChatView({
           </p>
         </div>
       )}
-      <Composer sessionID={sessionID} busy={busy} directory={directory} />
+      <Composer
+        sessionID={sessionID}
+        busy={busy}
+        directory={directory}
+        autoAccept={autoAccept}
+        onToggleAutoAccept={onToggleAutoAccept}
+      />
     </div>
   )
 }

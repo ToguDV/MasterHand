@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   ApiError,
@@ -22,6 +22,7 @@ import { SessionList } from "./components/SessionList"
 import { WorkspacePicker } from "./components/WorkspacePicker"
 
 const WORKSPACE_STORAGE_KEY = "masterhand.workspace"
+const AUTO_ACCEPT_STORAGE_KEY = "masterhand.autoAcceptSessions"
 
 function initialWorkspaceID(): string | null {
   const fromUrl = new URLSearchParams(window.location.search).get("workspace")
@@ -30,6 +31,16 @@ function initialWorkspaceID(): string | null {
     return window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
   } catch {
     return null
+  }
+}
+
+function loadAutoAcceptSessions(): string[] {
+  try {
+    const raw = window.localStorage.getItem(AUTO_ACCEPT_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []
+  } catch {
+    return []
   }
 }
 
@@ -48,6 +59,29 @@ export default function App() {
   const [responding, setResponding] = useState(false)
   const [creating, setCreating] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
+  const [autoAcceptSessions, setAutoAcceptSessions] = useState<string[]>(loadAutoAcceptSessions)
+
+  // Mirrors for the memoized event handler: it must see the latest values
+  // without being recreated (which would resubscribe the stream).
+  const autoAcceptSessionsRef = useRef(autoAcceptSessions)
+  autoAcceptSessionsRef.current = autoAcceptSessions
+  const answeringRef = useRef(new Set<string>())
+
+  /** Answers a permission request automatically ("once", reversible). */
+  const answerAuto = useCallback(async (permission: Permission) => {
+    if (answeringRef.current.has(permission.id)) return
+    answeringRef.current.add(permission.id)
+    try {
+      await client.api.respondPermission(permission.sessionID, permission.id, "once")
+    } catch {
+      setBanner("Could not answer the permission request")
+    } finally {
+      answeringRef.current.delete(permission.id)
+      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
+    }
+  }, [])
+  const answerAutoRef = useRef(answerAuto)
+  answerAutoRef.current = answerAuto
 
   const statusQuery = useBffStatus(client, authed ? 15_000 : false)
 
@@ -65,8 +99,13 @@ export default function App() {
   const handleEvent = useMemo(
     () =>
       createEventHandler(queryClient, {
-        onPermission: (permission) =>
-          setPermissions((prev) => (prev.some((item) => item.id === permission.id) ? prev : [...prev, permission])),
+        onPermission: (permission) => {
+          if (autoAcceptSessionsRef.current.includes(permission.sessionID)) {
+            void answerAutoRef.current(permission)
+            return
+          }
+          setPermissions((prev) => (prev.some((item) => item.id === permission.id) ? prev : [...prev, permission]))
+        },
         onPermissionReplied: (permissionID) =>
           setPermissions((prev) => prev.filter((item) => item.id !== permissionID)),
         onSessionError: (message) => setBanner(message),
@@ -145,6 +184,29 @@ export default function App() {
     if (authed !== true || !workspacesQuery.data) return
     void syncPermissions()
   }, [authed, workspacesQuery.data, syncPermissions])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AUTO_ACCEPT_STORAGE_KEY, JSON.stringify(autoAcceptSessions))
+    } catch {
+      // storage may be unavailable (private mode)
+    }
+  }, [autoAcceptSessions])
+
+  // Drain the queue for sessions with auto-accept on. This also covers pending
+  // requests recovered on reconnect/reload (they never arrive as events).
+  useEffect(() => {
+    if (autoAcceptSessions.length === 0 || permissions.length === 0) return
+    for (const permission of permissions) {
+      if (autoAcceptSessions.includes(permission.sessionID)) void answerAuto(permission)
+    }
+  }, [autoAcceptSessions, permissions, answerAuto])
+
+  const toggleAutoAccept = useCallback((id: string, on: boolean) => {
+    setAutoAcceptSessions((prev) =>
+      on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((item) => item !== id),
+    )
+  }, [])
 
   useEffect(() => {
     if (authed !== true) return
@@ -328,7 +390,15 @@ export default function App() {
 
         <main className={`${sessionID ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
           {sessionID ? (
-            <ChatView key={sessionID} sessionID={sessionID} busy={busy} connected={connected} directory={directory} />
+            <ChatView
+              key={sessionID}
+              sessionID={sessionID}
+              busy={busy}
+              connected={connected}
+              directory={directory}
+              autoAccept={autoAcceptSessions.includes(sessionID)}
+              onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
+            />
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-zinc-500">
               Select a session or create a new one.

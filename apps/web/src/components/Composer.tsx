@@ -20,10 +20,14 @@ export function Composer({
   sessionID,
   busy,
   directory,
+  autoAccept,
+  onToggleAutoAccept,
 }: {
   sessionID: string
   busy: boolean
   directory?: string | null
+  autoAccept: boolean
+  onToggleAutoAccept: (on: boolean) => void
 }) {
   const agentsQuery = useAgents(client)
   const providersQuery = useProviders(client)
@@ -132,6 +136,19 @@ export function Composer({
               placeholder="Effort: default"
             />
           )}
+          <button
+            type="button"
+            aria-pressed={autoAccept}
+            onClick={() => onToggleAutoAccept(!autoAccept)}
+            title="Auto-accept permission requests for this session (answers “once”)"
+            className={`shrink-0 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+              autoAccept
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                : "border-zinc-800 bg-zinc-900 text-zinc-500 hover:bg-zinc-800"
+            }`}
+          >
+            {autoAccept ? "Auto-accept: on" : "Auto-accept"}
+          </button>
         </div>
 
         <div className="flex items-end gap-2">
