@@ -9,6 +9,7 @@ import {
   messageText,
   removeMessage,
   removePart,
+  sessionUsage,
   splitFences,
   toolTitle,
   upsertMessage,
@@ -30,6 +31,34 @@ function userMessage(id: string): UserMessage {
     model: { providerID: "test", modelID: "test-model" },
   }
 }
+
+function assistantMessage(id: string, cost: number, output: number): AssistantMessage {
+  return {
+    id,
+    sessionID: "ses_1",
+    role: "assistant",
+    time: { created: 1, completed: 2 },
+    modelID: "test-model",
+    providerID: "test",
+    cost,
+    tokens: { input: 0, output, reasoning: 0, cache: { read: 0, write: 0 } },
+  } as unknown as AssistantMessage
+}
+
+describe("sessionUsage", () => {
+  it("totals cost and output tokens across assistant messages only", () => {
+    const list: MessageWithParts[] = [
+      { info: userMessage("msg_1"), parts: [] },
+      { info: assistantMessage("msg_2", 0.5, 100), parts: [] },
+      { info: assistantMessage("msg_3", 0.25, 50), parts: [] },
+    ]
+    expect(sessionUsage(list)).toEqual({ cost: 0.75, tokens: 150 })
+  })
+
+  it("returns zeroes for an empty session", () => {
+    expect(sessionUsage([])).toEqual({ cost: 0, tokens: 0 })
+  })
+})
 
 describe("mergePart", () => {
   it("appends the delta when the incoming text matches the current one", () => {

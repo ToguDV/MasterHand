@@ -12,11 +12,13 @@ export {
   messageText,
   removeMessage,
   removePart,
+  sessionUsage,
   splitFences,
   toolTitle,
   upsertMessage,
   upsertPart,
   type MessageWithParts,
+  type SessionUsage,
   type TextSegment,
 } from "./chat"
 export {

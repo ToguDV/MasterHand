@@ -1,6 +1,6 @@
 import { useRef } from "react"
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native"
-import { useMessages, type Client, type MessageWithParts } from "@masterhand/client-core"
+import { sessionUsage, useMessages, type Client, type MessageWithParts } from "@masterhand/client-core"
 import { Composer } from "../components/Composer"
 import { MessageBubble } from "../components/MessageBubble"
 import { Screen } from "../components/Screen"
@@ -26,6 +26,7 @@ export function ChatScreen({
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
   const listRef = useRef<FlatList<MessageWithParts>>(null)
   const messages = messagesQuery.data ?? []
+  const usage = sessionUsage(messages)
 
   return (
     <Screen>
@@ -55,6 +56,13 @@ export function ChatScreen({
         }
         renderItem={({ item }) => <MessageBubble entry={item} />}
       />
+
+      {usage.cost > 0 ? (
+        <Text style={styles.usage}>
+          Session · ${usage.cost.toFixed(4)}
+          {usage.tokens > 0 ? ` · ${usage.tokens} tok` : ""}
+        </Text>
+      ) : null}
 
       <Composer client={client} sessionID={sessionID} busy={busy} directory={directory} />
     </Screen>
@@ -103,5 +111,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     paddingVertical: 32,
+  },
+  usage: {
+    color: colors.muted,
+    fontSize: 11,
+    textAlign: "right",
+    paddingHorizontal: 14,
+    paddingTop: 8,
   },
 })

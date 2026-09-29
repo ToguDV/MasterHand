@@ -50,6 +50,22 @@ export function removeMessage(list: MessageWithParts[], messageID: string): Mess
   return list.filter((entry) => entry.info.id !== messageID)
 }
 
+export interface SessionUsage {
+  cost: number
+  tokens: number
+}
+
+export function sessionUsage(messages: MessageWithParts[]): SessionUsage {
+  let cost = 0
+  let tokens = 0
+  for (const entry of messages) {
+    if (entry.info.role !== "assistant") continue
+    cost += entry.info.cost
+    tokens += entry.info.tokens.output
+  }
+  return { cost, tokens }
+}
+
 export function messageText(entry: MessageWithParts): string {
   return entry.parts
     .filter((part): part is TextPart => part.type === "text")
