@@ -74,31 +74,6 @@ export default function App() {
     [queryClient],
   )
 
-  const handleConnect = useCallback(() => invalidateOnReconnect(queryClient), [queryClient])
-
-  useEventStream(client, {
-    enabled: authed === true,
-    onEvent: handleEvent,
-    onConnectionChange: setConnected,
-    onConnect: handleConnect,
-  })
-
-  useEffect(() => {
-    if (authed !== true) return
-    function refresh(): void {
-      if (document.visibilityState !== "visible") return
-      void queryClient.invalidateQueries({ queryKey: ["messages"] })
-      void queryClient.invalidateQueries({ queryKey: ["statuses"] })
-      void queryClient.invalidateQueries({ queryKey: ["sessions"] })
-    }
-    document.addEventListener("visibilitychange", refresh)
-    window.addEventListener("online", refresh)
-    return () => {
-      document.removeEventListener("visibilitychange", refresh)
-      window.removeEventListener("online", refresh)
-    }
-  }, [authed, queryClient])
-
   const openSession = useCallback((id: string | null) => {
     setSessionID(id)
     const url = new URL(window.location.href)
@@ -132,6 +107,60 @@ export default function App() {
 
   const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
   const directory = workspace?.path ?? null
+
+  // `permission.asked` events are lost while disconnected and never replayed.
+  // On connect (and once workspaces load) reconcile against opencode, which
+  // exposes pending requests per workspace directory.
+  const syncPermissions = useCallback(async () => {
+    const directories = (workspacesQuery.data ?? []).map((item) => item.path)
+    try {
+      const lists = await Promise.all(
+        directories.map((dir) => client.api.permissions(dir).catch(() => [] as Permission[])),
+      )
+      const pending = lists.flat()
+      if (pending.length === 0) return
+      setPermissions((prev) => {
+        const byId = new Map(prev.map((item) => [item.id, item]))
+        for (const item of pending) byId.set(item.id, item)
+        return [...byId.values()]
+      })
+    } catch {
+      // best effort: a missed stream event is not worth surfacing an error
+    }
+  }, [workspacesQuery.data])
+
+  const handleConnect = useCallback(() => {
+    invalidateOnReconnect(queryClient)
+    void syncPermissions()
+  }, [queryClient, syncPermissions])
+
+  useEventStream(client, {
+    enabled: authed === true,
+    onEvent: handleEvent,
+    onConnectionChange: setConnected,
+    onConnect: handleConnect,
+  })
+
+  useEffect(() => {
+    if (authed !== true || !workspacesQuery.data) return
+    void syncPermissions()
+  }, [authed, workspacesQuery.data, syncPermissions])
+
+  useEffect(() => {
+    if (authed !== true) return
+    function refresh(): void {
+      if (document.visibilityState !== "visible") return
+      void queryClient.invalidateQueries({ queryKey: ["messages"] })
+      void queryClient.invalidateQueries({ queryKey: ["statuses"] })
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+    }
+    document.addEventListener("visibilitychange", refresh)
+    window.addEventListener("online", refresh)
+    return () => {
+      document.removeEventListener("visibilitychange", refresh)
+      window.removeEventListener("online", refresh)
+    }
+  }, [authed, queryClient])
 
   const sessionsQuery = useSessions(client, authed === true, 10_000, directory)
   const statusesQuery = useSessionStatuses(client, authed === true, connected)
@@ -213,12 +242,15 @@ export default function App() {
     if (!permission) return
     setResponding(true)
     try {
-      await client.api.respondPermission(permission.sessionID, permission.id, response, directory)
+      // The session id resolves the request regardless of the active workspace.
+      const answered = await client.api.respondPermission(permission.sessionID, permission.id, response)
+      if (answered === false) setBanner("This permission was already answered")
+      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     } catch {
+      // Keep the dialog open so the user can retry.
       setBanner("Could not answer the permission request")
     } finally {
       setResponding(false)
-      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     }
   }
 

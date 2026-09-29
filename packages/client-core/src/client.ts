@@ -6,6 +6,7 @@ import type {
   DeviceLoginResponse,
   DeviceRecord,
   MessageWithPartsResponse,
+  Permission,
   PermissionResponse,
   Project,
   PromptBody,
@@ -53,6 +54,8 @@ export interface Client {
     abortSession(id: string, directory?: string | null): Promise<boolean>
     messages(id: string, directory?: string | null): Promise<MessageWithPartsResponse[]>
     promptAsync(id: string, body: PromptBody, directory?: string | null): Promise<void>
+    /** Pending permission requests. opencode scopes this by `directory`. */
+    permissions(directory?: string | null): Promise<Permission[]>
     respondPermission(
       sessionID: string,
       permissionID: string,
@@ -142,6 +145,7 @@ export function createClient(options: ClientOptions = {}): Client {
       messages: (id, directory) => opencode<MessageWithPartsResponse[]>(`/session/${id}/message`, undefined, directory),
       promptAsync: (id, body, directory) =>
         opencode<void>(`/session/${id}/prompt_async`, { method: "POST", body: JSON.stringify(body) }, directory),
+      permissions: (directory) => opencode<Permission[]>("/permission", undefined, directory),
       respondPermission: (sessionID, permissionID, response, directory) =>
         opencode<boolean>(
           `/session/${sessionID}/permissions/${permissionID}`,

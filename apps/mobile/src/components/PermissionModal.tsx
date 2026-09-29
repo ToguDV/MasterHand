@@ -11,18 +11,15 @@ export function PermissionModal({
   busy: boolean
   onRespond: (response: "once" | "always" | "reject") => void
 }) {
-  const pattern = Array.isArray(permission.pattern) ? permission.pattern.join(", ") : permission.pattern
+  const patterns = permission.patterns?.join(", ") ?? ""
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => {}}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <Text style={styles.heading}>Permission required</Text>
-          <Text style={styles.title}>{permission.title}</Text>
-          <Text style={styles.meta}>
-            {permission.type}
-            {pattern ? ` · ${pattern}` : ""}
-          </Text>
+          <Text style={styles.title}>{permission.permission}</Text>
+          {patterns ? <Text style={styles.meta}>{patterns}</Text> : null}
 
           <View style={styles.actions}>
             <Pressable

@@ -61,6 +61,8 @@ curl -X POST https://your-origin.example/api/oc/session/<id>/prompt_async \
 # answer permission
 curl -X POST https://your-origin.example/api/oc/session/<id>/permissions/<permissionID> \
   -H 'content-type: application/json' -d '{"response":"once"}'
+# list pending permissions for a workspace (to reconcile missed SSE events)
+curl 'https://your-origin.example/api/oc/permission?directory=/workspace/my-app'
 # native login (device token)
 curl -X POST https://your-origin.example/api/devices \
   -H 'content-type: application/json' -d '{"password":"...","name":"Pixel 9"}'

@@ -5,7 +5,6 @@ export type {
   UserMessage,
   AssistantMessage,
   Part,
-  Permission,
   Event,
   FileDiff,
   Todo,
@@ -19,6 +18,27 @@ export type {
   Config,
   Project,
 } from "@opencode-ai/sdk"
+
+/**
+ * A pending opencode permission request, as carried by the `permission.asked`
+ * event and `GET /permission` (verified against opencode 1.18.32).
+ *
+ * The published SDK still describes the older `permission.updated` payload
+ * (`type`, `pattern`, `title`, `time`), which the server no longer emits, so
+ * MasterHand models the real shape here.
+ */
+export interface Permission {
+  id: string
+  sessionID: string
+  /** Permission kind, e.g. "bash", "edit". */
+  permission: string
+  /** Affected resources (commands, paths, globs). */
+  patterns: string[]
+  metadata?: Record<string, unknown>
+  /** Patterns the "always" answer would persist. */
+  always?: string[]
+  tool?: { messageID: string; callID: string }
+}
 
 /**
  * The model a session last ran with. opencode persists it per session and

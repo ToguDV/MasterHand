@@ -113,15 +113,34 @@ describe("createEventHandler", () => {
     const onSessionError = vi.fn()
     const handler = createEventHandler(qc, { onPermission, onPermissionReplied, onSessionError })
 
+    const permission = {
+      id: "per_1",
+      sessionID: "ses_1",
+      permission: "bash",
+      patterns: ["ls"],
+    } as Permission
+    handler({ type: "permission.asked", properties: permission })
+    expect(onPermission).toHaveBeenCalledWith(permission)
+
+    handler({ type: "permission.replied", properties: { sessionID: "ses_1", requestID: "per_1", reply: "once" } })
+    expect(onPermissionReplied).toHaveBeenCalledWith("per_1")
+
+    handler({ type: "session.error", properties: { sessionID: "ses_1", error: { name: "UnknownError", data: { message: "boom\nstack" } } } })
+    expect(onSessionError).toHaveBeenCalledWith("boom")
+  })
+
+  it("still accepts the legacy permission.updated event and permissionID payloads", () => {
+    const { qc } = makeQueryClient()
+    const onPermission = vi.fn()
+    const onPermissionReplied = vi.fn()
+    const handler = createEventHandler(qc, { onPermission, onPermissionReplied })
+
     const permission = { id: "per_1", sessionID: "ses_1" } as unknown as Permission
     handler({ type: "permission.updated", properties: permission })
     expect(onPermission).toHaveBeenCalledWith(permission)
 
     handler({ type: "permission.replied", properties: { permissionID: "per_1" } })
     expect(onPermissionReplied).toHaveBeenCalledWith("per_1")
-
-    handler({ type: "session.error", properties: { sessionID: "ses_1", error: { name: "UnknownError", data: { message: "boom\nstack" } } } })
-    expect(onSessionError).toHaveBeenCalledWith("boom")
   })
 
   it("ignores aborted turns", () => {
@@ -142,7 +161,7 @@ describe("createEventHandler", () => {
   it("works without callbacks", () => {
     const { qc } = makeQueryClient()
     const handler = createEventHandler(qc)
-    expect(() => handler({ type: "permission.updated", properties: {} })).not.toThrow()
+    expect(() => handler({ type: "permission.asked", properties: {} })).not.toThrow()
     expect(() => handler({ type: "session.error", properties: {} })).not.toThrow()
   })
 })

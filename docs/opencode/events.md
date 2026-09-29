@@ -29,8 +29,8 @@ Verified on **2026-09-27** against [`types.gen.ts`](https://github.com/anomalyco
 | `message.removed` | `{ sessionID, messageID }` | Remove message from the view |
 | `message.part.updated` | `{ part: Part, delta?: string }` | **Live streaming** (text, tool calls, reasoning) |
 | `message.part.removed` | `{ sessionID, messageID, partID }` | Remove part from the view |
-| `permission.updated` | `Permission` (see below) | **Approval modal + in-app notification** |
-| `permission.replied` | `{ sessionID, permissionID, response }` | Sync the answer across devices |
+| `permission.asked` | `Permission` (see below) | **Approval modal + in-app notification** |
+| `permission.replied` | `{ sessionID, requestID, reply }` | Sync the answer across devices |
 | `todo.updated` | `{ sessionID, todos: Todo[] }` | Future: agent task list |
 | `session.diff` | `{ sessionID, diff: FileDiff[] }` | Future: visual diffs |
 | `file.edited` | `{ file }` | Future: refresh files |
@@ -54,19 +54,36 @@ Verified union of part types:
 
 > All share `id`, `sessionID`, `messageID` and `type`. Specific fields (e.g. `TextPart.text`, `ToolPart` with state/input/output) should be documented here while implementing rendering, consulting `types.gen.ts`.
 
-### `Permission` (`permission.updated`)
+### `Permission` (`permission.asked`)
+
+Verified on **1.18.32** (the version pinned in `deploy/.env`). The event was renamed from `permission.updated` and the payload changed; the published SDK still describes the old shape, so MasterHand models this one.
 
 ```ts
 {
   id: string
-  type: string                      // permission type (e.g. bash, edit, ...)
-  pattern?: string | string[]       // affected pattern
   sessionID: string
-  messageID: string
-  callID?: string
-  title: string                     // text to show the user
-  metadata: Record<string, unknown> // extra tool context
-  time: { created: number }
+  permission: string                // permission kind (e.g. bash, edit)
+  patterns: string[]                // affected resources (commands, paths, globs)
+  metadata: Record<string, unknown> // extra tool context (e.g. { command: "ls" })
+  always: string[]                  // patterns the "always" answer would persist
+  tool?: { messageID: string; callID: string }
+}
+```
+
+Real captured event (agent tool flow, `bash`):
+
+```json
+{
+  "type": "permission.asked",
+  "properties": {
+    "id": "per_…",
+    "sessionID": "ses_…",
+    "permission": "bash",
+    "patterns": ["ls"],
+    "metadata": { "command": "ls" },
+    "always": ["ls *"],
+    "tool": { "messageID": "msg_…", "callID": "call_…" }
+  }
 }
 ```
 
@@ -80,6 +97,7 @@ Verified union of part types:
 
 ## Integration notes
 
-- Answer a permission: `POST /session/:id/permissions/:permissionID` with body `{ response, remember? }` (per the official docs). The exact `response` values must be confirmed against `/doc` when integrating.
+- Answer a permission: `POST /session/:id/permissions/:permissionID` with body `{ response: "once" | "always" | "reject" }` (verified on 1.18.32). The session id resolves the request, so no `directory` override is required.
+- List pending permissions: `GET /permission?directory=<abs-path>` returns `Permission[]`. It is **per instance/directory** — without `directory` it does not return requests from other project folders, so reconcile each workspace. There is also a v2 API and `permission.v2.asked` events used by `POST /api/session/:id/permission`; the agent tool flow emits the classic `permission.asked` treated above.
 - `delta?` in `message.part.updated` carries the incremental text fragment when applicable; if missing, replace the whole part with `part`.
 - The UI must not rely on SSE alone for consistency: on open or reconnect, load history with `GET /session/:id/message`.
