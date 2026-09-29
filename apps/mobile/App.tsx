@@ -26,10 +26,12 @@ import {
   clearDevice,
   clearToken,
   clearWorkspaceID,
+  loadAutoAcceptSessions,
   loadDevice,
   loadServerUrl,
   loadToken,
   loadWorkspaceID,
+  saveAutoAcceptSessions,
   saveDevice,
   saveServerUrl,
   saveToken,
@@ -153,6 +155,45 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   const [connected, setConnected] = useState(false)
   const [creating, setCreating] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
+  const [autoAcceptSessions, setAutoAcceptSessions] = useState<string[]>([])
+  const autoAcceptLoaded = useRef(false)
+
+  useEffect(() => {
+    void loadAutoAcceptSessions().then((ids) => {
+      setAutoAcceptSessions(ids)
+      autoAcceptLoaded.current = true
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!autoAcceptLoaded.current) return
+    void saveAutoAcceptSessions(autoAcceptSessions)
+  }, [autoAcceptSessions])
+
+  // Mirrors for the memoized event handler: it must see the latest values
+  // without being recreated (which would resubscribe the stream).
+  const autoAcceptSessionsRef = useRef(autoAcceptSessions)
+  autoAcceptSessionsRef.current = autoAcceptSessions
+  const answeringRef = useRef(new Set<string>())
+
+  /** Answers a permission request automatically ("once", reversible). */
+  const answerAuto = useCallback(
+    async (permission: Permission) => {
+      if (answeringRef.current.has(permission.id)) return
+      answeringRef.current.add(permission.id)
+      try {
+        await client.api.respondPermission(permission.sessionID, permission.id, "once")
+      } catch {
+        setBanner("Could not answer the permission request")
+      } finally {
+        answeringRef.current.delete(permission.id)
+        setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
+      }
+    },
+    [client],
+  )
+  const answerAutoRef = useRef(answerAuto)
+  answerAutoRef.current = answerAuto
 
   useEffect(() => {
     void loadWorkspaceID().then(setWorkspaceID)
@@ -182,8 +223,13 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   const handleEvent = useMemo(
     () =>
       createEventHandler(queryClient, {
-        onPermission: (permission) =>
-          setPermissions((prev) => (prev.some((item) => item.id === permission.id) ? prev : [...prev, permission])),
+        onPermission: (permission) => {
+          if (autoAcceptSessionsRef.current.includes(permission.sessionID)) {
+            void answerAutoRef.current(permission)
+            return
+          }
+          setPermissions((prev) => (prev.some((item) => item.id === permission.id) ? prev : [...prev, permission]))
+        },
         onPermissionReplied: (permissionID) =>
           setPermissions((prev) => prev.filter((item) => item.id !== permissionID)),
         onSessionError: (message) => setBanner(message),
@@ -234,6 +280,21 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     })
     return () => subscription.remove()
   }, [syncPermissions])
+
+  // Drain the queue for sessions with auto-accept on. This also covers pending
+  // requests recovered on reconnect/reload (they never arrive as events).
+  useEffect(() => {
+    if (autoAcceptSessions.length === 0 || permissions.length === 0) return
+    for (const permission of permissions) {
+      if (autoAcceptSessions.includes(permission.sessionID)) void answerAuto(permission)
+    }
+  }, [autoAcceptSessions, permissions, answerAuto])
+
+  const toggleAutoAccept = useCallback((id: string, on: boolean) => {
+    setAutoAcceptSessions((prev) =>
+      on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((item) => item !== id),
+    )
+  }, [])
 
   async function createSession() {
     if (!directory) {
@@ -313,6 +374,8 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           busy={busy}
           connected={connected}
           directory={directory}
+          autoAccept={autoAcceptSessions.includes(sessionID)}
+          onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
           onBack={() => setSessionID(null)}
         />
       ) : (

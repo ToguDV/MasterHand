@@ -25,11 +25,15 @@ export function Composer({
   sessionID,
   busy,
   directory,
+  autoAccept,
+  onToggleAutoAccept,
 }: {
   client: Client
   sessionID: string
   busy: boolean
   directory?: string | null
+  autoAccept: boolean
+  onToggleAutoAccept: (on: boolean) => void
 }) {
   const agentsQuery = useAgents(client)
   const providersQuery = useProviders(client)
@@ -128,6 +132,20 @@ export function Composer({
             disabled={false}
           />
         )}
+        <Pressable
+          style={[styles.selector, styles.autoAccept, autoAccept && styles.autoAcceptOn]}
+          onPress={() => onToggleAutoAccept(!autoAccept)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: autoAccept }}
+          accessibilityLabel="Auto-accept permission requests for this session"
+        >
+          <Text
+            style={[styles.selectorText, autoAccept && styles.autoAcceptText]}
+            numberOfLines={1}
+          >
+            {autoAccept ? "auto-accept: on" : "auto-accept"}
+          </Text>
+        </Pressable>
       </View>
 
       <View style={styles.inputRow}>
@@ -225,6 +243,17 @@ const styles = StyleSheet.create({
   selectorText: {
     color: colors.text,
     fontSize: 12,
+  },
+  autoAccept: {
+    flexGrow: 0,
+    flexBasis: "auto",
+  },
+  autoAcceptOn: {
+    borderColor: colors.warning,
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+  },
+  autoAcceptText: {
+    color: colors.warning,
   },
   inputRow: {
     flexDirection: "row",

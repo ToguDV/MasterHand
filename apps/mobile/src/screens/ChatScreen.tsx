@@ -13,6 +13,8 @@ export function ChatScreen({
   busy,
   connected,
   directory,
+  autoAccept,
+  onToggleAutoAccept,
   onBack,
 }: {
   client: Client
@@ -21,6 +23,8 @@ export function ChatScreen({
   busy: boolean
   connected: boolean
   directory?: string | null
+  autoAccept: boolean
+  onToggleAutoAccept: (on: boolean) => void
   onBack: () => void
 }) {
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
@@ -64,7 +68,14 @@ export function ChatScreen({
         </Text>
       ) : null}
 
-      <Composer client={client} sessionID={sessionID} busy={busy} directory={directory} />
+      <Composer
+        client={client}
+        sessionID={sessionID}
+        busy={busy}
+        directory={directory}
+        autoAccept={autoAccept}
+        onToggleAutoAccept={onToggleAutoAccept}
+      />
     </Screen>
   )
 }
