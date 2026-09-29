@@ -17,6 +17,7 @@ import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog"
 import { ChatView } from "./components/ChatView"
 import { Login } from "./components/Login"
 import { PermissionDialog } from "./components/PermissionDialog"
+import { RemoveWorkspaceDialog } from "./components/RemoveWorkspaceDialog"
 import { SessionList } from "./components/SessionList"
 import { WorkspacePicker } from "./components/WorkspacePicker"
 
@@ -40,6 +41,8 @@ export default function App() {
   )
   const [workspaceID, setWorkspaceID] = useState<string | null>(initialWorkspaceID)
   const [addingWorkspace, setAddingWorkspace] = useState(false)
+  const [removeWorkspaceID, setRemoveWorkspaceID] = useState<string | null>(null)
+  const [removingWorkspace, setRemovingWorkspace] = useState(false)
   const [connected, setConnected] = useState(false)
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [responding, setResponding] = useState(false)
@@ -189,15 +192,19 @@ export default function App() {
     setAddingWorkspace(false)
   }
 
-  async function deleteWorkspace(id: string) {
-    const target = workspaces.find((item) => item.id === id)
-    if (!window.confirm(`Remove workspace "${target?.name ?? ""}"? Files and sessions are not deleted.`)) return
+  async function confirmRemoveWorkspace(deleteFiles: boolean) {
+    const id = removeWorkspaceID
+    if (!id) return
+    setRemovingWorkspace(true)
     try {
-      await client.workspaces.remove(id)
+      await client.workspaces.remove(id, { deleteFiles })
       if (workspaceID === id) selectWorkspace(null)
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+      setRemoveWorkspaceID(null)
     } catch {
       setBanner("Could not remove the workspace")
+    } finally {
+      setRemovingWorkspace(false)
     }
   }
 
@@ -273,7 +280,7 @@ export default function App() {
             selectedID={workspaceID}
             onSelect={selectWorkspace}
             onAdd={() => setAddingWorkspace(true)}
-            onDelete={(id) => void deleteWorkspace(id)}
+            onDelete={setRemoveWorkspaceID}
           />
           <SessionList
             sessions={sessions}
@@ -308,6 +315,15 @@ export default function App() {
 
       {addingWorkspace && (
         <AddWorkspaceDialog onSubmit={addWorkspace} onClose={() => setAddingWorkspace(false)} />
+      )}
+
+      {removeWorkspaceID && (
+        <RemoveWorkspaceDialog
+          name={workspaces.find((item) => item.id === removeWorkspaceID)?.name ?? ""}
+          busy={removingWorkspace}
+          onConfirm={confirmRemoveWorkspace}
+          onClose={() => setRemoveWorkspaceID(null)}
+        />
       )}
     </div>
   )

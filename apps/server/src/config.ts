@@ -1,3 +1,5 @@
+import { resolve } from "node:path"
+
 export interface Config {
   port: number
   opencodeUrl: string
@@ -9,8 +11,8 @@ export interface Config {
   dataDir: string
   webDist: string | null
   allowedOrigins: string[]
-  /** When set, registered workspaces must live under this directory. */
-  workspacesRoot: string | null
+  /** Base directory under which every workspace subfolder is created. */
+  workspacesRoot: string
 }
 
 function intFromEnv(value: string | undefined, fallback: number): number {
@@ -63,6 +65,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: env.DATA_DIR ?? "./data",
     webDist: env.WEB_DIST === "" ? null : (env.WEB_DIST ?? "apps/web/dist"),
     allowedOrigins: [...allowedOrigins],
-    workspacesRoot: env.WORKSPACES_ROOT?.trim() || null,
+    workspacesRoot: resolve(env.WORKSPACES_ROOT?.trim() || "./workspace"),
   }
 }

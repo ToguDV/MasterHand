@@ -3,8 +3,7 @@ import { addWorkspace, login } from "./helpers"
 
 test("adds a workspace, deletes a session and removes the workspace", async ({ page }) => {
   await login(page)
-  const workspacePath = await addWorkspace(page)
-  const workspaceName = workspacePath.split("/").pop() ?? workspacePath
+  const workspaceName = await addWorkspace(page)
   await expect(page.getByRole("button", { name: "+ New" })).toBeEnabled()
 
   await page.getByRole("button", { name: "+ New" }).click()
@@ -17,16 +16,17 @@ test("adds a workspace, deletes a session and removes the workspace", async ({ p
   await expect(page.getByText("No sessions yet.")).toBeVisible()
 
   await page.getByRole("button", { name: "Remove workspace" }).click()
-  await expect(page.getByText(workspacePath)).toBeHidden()
+  await expect(page.getByRole("heading", { name: "Remove workspace" })).toBeVisible()
+  await page.getByRole("button", { name: "Remove", exact: true }).click()
   await expect(page.getByRole("option", { name: workspaceName })).toHaveCount(0)
 })
 
-test("rejects a workspace path that does not exist", async ({ page }) => {
+test("rejects an invalid workspace name", async ({ page }) => {
   await login(page)
   await page.getByRole("button", { name: "Add workspace" }).click()
-  await page.getByPlaceholder("/workspace/my-project").fill("/definitely/missing/mh-e2e")
+  await page.getByPlaceholder("my-project").fill("bad/name")
   await page.getByRole("button", { name: "Add", exact: true }).click()
-  await expect(page.getByText("That folder does not exist or is not accessible to opencode")).toBeVisible()
+  await expect(page.getByText("Enter a valid folder name (no slashes or leading dots)")).toBeVisible()
 })
 
 test("keeps sessions scoped to the selected workspace", async ({ page }) => {

@@ -1,6 +1,3 @@
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { expect, type Page } from "@playwright/test"
 
 export async function login(page: Page): Promise<void> {
@@ -10,12 +7,12 @@ export async function login(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: "Sign in" })).toBeHidden()
 }
 
-export async function addWorkspace(page: Page, path?: string): Promise<string> {
-  // The BFF validates that the folder exists, so E2E uses a real temp directory.
-  const workspacePath = path ?? mkdtempSync(join(tmpdir(), "mh-e2e-"))
+export async function addWorkspace(page: Page, name?: string): Promise<string> {
+  // The BFF creates the folder under WORKSPACES_ROOT; a unique name per run avoids clashes.
+  const workspaceName = name ?? `mh-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   await page.getByRole("button", { name: "Add workspace" }).click()
-  await page.getByPlaceholder("/workspace/my-project").fill(workspacePath)
+  await page.getByPlaceholder("my-project").fill(workspaceName)
   await page.getByRole("button", { name: "Add", exact: true }).click()
-  await expect(page.getByText(workspacePath)).toBeVisible()
-  return workspacePath
+  await expect(page.getByRole("option", { name: workspaceName })).toHaveCount(1)
+  return workspaceName
 }

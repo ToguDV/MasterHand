@@ -242,9 +242,9 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     void saveWorkspaceID(created.id)
   }
 
-  async function removeWorkspace(id: string) {
+  async function removeWorkspace(id: string, options: { deleteFiles: boolean }) {
     try {
-      await client.workspaces.remove(id)
+      await client.workspaces.remove(id, options)
       if (workspaceID === id) {
         setWorkspaceID(null)
         void clearWorkspaceID()
@@ -302,7 +302,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           onSignOut={onSignOut}
           onSelectWorkspace={selectWorkspace}
           onAddWorkspace={addWorkspace}
-          onRemoveWorkspace={(id) => void removeWorkspace(id)}
+          onRemoveWorkspace={(id, options) => void removeWorkspace(id, options)}
           onDeleteSession={(id) => void deleteSession(id)}
         />
       )}

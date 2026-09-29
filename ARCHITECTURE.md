@@ -105,12 +105,13 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 - On (re)connect, `sessions`, `messages` and `statuses` are invalidated to reconcile missed events.
 - Fallback without SSE: connection down → polling (messages every 5s, statuses every 4s); active turn → messages every 3s.
 
-### 4.6 Workspaces (multiple project folders)
+### 4.6 Workspaces (isolated project folders)
 
-- A **workspace** is a project folder registered in the BFF (`workspaces` table in SQLite: `id`, `name`, `path`). Registration validates that the path is absolute and, when `WORKSPACES_ROOT` is set, that it lives under that root (the directory is mounted into the opencode container).
+- There is a single **workspaces root** (`WORKSPACES_ROOT`, default `./workspace`; `/workspace` in Docker), the folder opencode works in. Every **workspace** is a subfolder of it, tracked in the BFF (`workspaces` table in SQLite: `id`, `name`, `path`).
+- Clients only send a **name**; the BFF sanitizes it to a single path segment (no separators, traversal or leading dots), derives `<root>/<name>` and creates the folder with `mkdir -p`. The name and the folder are the same, so arbitrary absolute paths can never be registered and everything stays isolated under the root.
 - Clients pick a workspace; every opencode call carries its `path` as the `directory` override (query on GET, `x-opencode-directory` header on mutations). Sessions are therefore created in and listed for the selected folder.
-- Deleting a workspace only forgets it in MasterHand: **files and opencode sessions are untouched** (opencode has no project deletion). Deleting a session calls `DELETE /session/:id` with the workspace directory and removes its data.
-- The BFF persists the list; the filesystem and project data remain owned by opencode.
+- Deleting a workspace forgets it in MasterHand. With `?deleteFiles=1` (a checkbox in the UI) the BFF also removes the folder and its files; it refuses (`403`) when the stored path lies outside the root. Deleting a session calls `DELETE /session/:id` with the workspace directory and removes its data.
+- The BFF persists the list and owns folder creation/deletion; opencode works inside the same mounted root.
 
 ## 5. Security model
 
@@ -139,12 +140,12 @@ deploy/
 | Service | Image | Ports | Volumes |
 |---|---|---|---|
 | `masterhand` | build of `apps/server` (also serves the static web build) | `${MASTERHAND_BIND:-0.0.0.0}:${MASTERHAND_PORT:-8787}` → `8787` | `masterhand_data` (SQLite) |
-| `opencode` | `opencode.Dockerfile` (pinned version) | none (internal `4096`) | `opencode_config`, `opencode_data`, `./projects` |
+| `opencode` | `opencode.Dockerfile` (pinned version) | none (internal `4096`) | `opencode_config`, `opencode_data`, `./workspace` (shared with the BFF, which creates each workspace folder) |
 
 - `restart: unless-stopped` on all services → the host restarts and the stack comes back on its own.
 - The deployer points their own TLS/domain at the published BFF port and sets `ALLOWED_ORIGINS` if a different origin proxies to it. Bind to `127.0.0.1` with `MASTERHAND_BIND` when the reverse proxy runs on the host.
 - Provider authentication: `docker compose run --rm opencode auth login` (persists to a volume).
-- Agents work on `./projects` (bind mount) so files can be inspected/versioned from the host.
+- Agents work under `./workspace` (bind mount) so files can be inspected/versioned from the host; the BFF creates one subfolder per workspace there.
 - Backups: volumes `masterhand_data`, `opencode_data` and `opencode_config`.
 - Upgrade: opencode pinned; `docker compose build && docker compose up -d`.
 - See `docs/runbooks/deployment.md` for concrete TLS options.
@@ -163,7 +164,7 @@ deploy/
 | ADR-8 | Bearer tokens for native clients, cookie for web | React Native does not handle cookies like a browser; tokens enable revocable multi-device access | Cookie-only (fragile on native), token-only everywhere (loses HttpOnly/CSRF benefits on web) |
 | ADR-9 | In-app SSE notifications for the MVP; native push deferred | No APNs/FCM accounts or extra infrastructure required | Native push now (cost), Web Push (implies service worker / PWA) |
 | ADR-10 | Adopt the YAGNI ladder as a written guideline in `AGENTS.md`; do not install the third-party `ponytail` plugin | Keeps the minimalism principle without an always-on external prompt that would fight documented decisions or alter subagent behavior | Installing the `ponytail` plugin (third-party supply chain, injects rules into every turn and subagent, conflicts with the spec-driven approach) |
-| ADR-11 | Workspaces are a MasterHand-side registry (SQLite) of project folders; opencode is targeted per request with its `directory` override | opencode has no project-deletion endpoint, so a deletable "workspace" must be owned by MasterHand; the same server already supports multiple projects via `directory` (query on GET, `x-opencode-directory` header on mutations) | Listing `GET /project` directly (no deletion possible), opencode's experimental v2 workspaces (git worktrees, not folders, unstable) |
+| ADR-11 | Workspaces are subfolders MasterHand creates under a single configured root; the BFF owns the records and the folders, and opencode is targeted per request with its `directory` override | opencode has no project-deletion endpoint, so a deletable "workspace" must be owned by MasterHand; deriving the path from a sanitized name keeps every project isolated under one root and removes unsafe absolute paths | Registering arbitrary existing absolute paths (escapes the root, requires the user to pre-create folders), listing `GET /project` directly (no deletion possible), opencode's experimental v2 workspaces (git worktrees, not folders, unstable) |
 
 ## 8. Risks
 

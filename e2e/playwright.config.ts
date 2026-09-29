@@ -42,6 +42,7 @@ export default defineConfig({
         SESSION_SECRET: "e2e-secret",
         COOKIE_SECURE: "false",
         DATA_DIR: "/tmp/masterhand-e2e",
+        WORKSPACES_ROOT: "/tmp/masterhand-e2e-workspace",
       },
       url: `http://127.0.0.1:${BFF_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,

@@ -1,30 +1,51 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { normalizeWorkspacePath, workspaceName, workspacePathExists } from "../src/workspaces.js"
+import {
+  createWorkspaceDir,
+  isInsideRoot,
+  normalizeWorkspaceSlug,
+  removeWorkspaceDir,
+  workspaceName,
+  workspacePath,
+} from "../src/workspaces.js"
 
-describe("normalizeWorkspacePath", () => {
-  it("accepts absolute paths and strips trailing slashes", () => {
-    expect(normalizeWorkspacePath("/workspace/app/", null)).toEqual({ ok: true, path: "/workspace/app" })
-    expect(normalizeWorkspacePath("  /workspace/app  ", null)).toEqual({ ok: true, path: "/workspace/app" })
+describe("normalizeWorkspaceSlug", () => {
+  it("accepts plain folder names and trims them", () => {
+    expect(normalizeWorkspaceSlug("my-app")).toEqual({ ok: true, slug: "my-app" })
+    expect(normalizeWorkspaceSlug("  my app  ")).toEqual({ ok: true, slug: "my app" })
   })
 
-  it("rejects non-string, empty and relative paths", () => {
-    expect(normalizeWorkspacePath(undefined, null)).toEqual({ ok: false, error: "invalid_path" })
-    expect(normalizeWorkspacePath("", null)).toEqual({ ok: false, error: "invalid_path" })
-    expect(normalizeWorkspacePath("relative/path", null)).toEqual({ ok: false, error: "invalid_path" })
+  it("rejects non-string, empty and too-long names", () => {
+    expect(normalizeWorkspaceSlug(undefined)).toEqual({ ok: false, error: "invalid_name" })
+    expect(normalizeWorkspaceSlug("")).toEqual({ ok: false, error: "invalid_name" })
+    expect(normalizeWorkspaceSlug("a".repeat(65))).toEqual({ ok: false, error: "invalid_name" })
   })
 
-  it("enforces the configured root", () => {
-    expect(normalizeWorkspacePath("/workspace/app", "/workspace")).toEqual({ ok: true, path: "/workspace/app" })
-    expect(normalizeWorkspacePath("/workspace", "/workspace")).toEqual({ ok: true, path: "/workspace" })
-    expect(normalizeWorkspacePath("/workspace/../etc", "/workspace")).toEqual({ ok: false, error: "outside_root" })
-    expect(normalizeWorkspacePath("/other/app", "/workspace")).toEqual({ ok: false, error: "outside_root" })
+  it("rejects traversal, separators and hidden names", () => {
+    for (const name of [".", "..", ".git", "a/b", "a\\b", "a\u0000b"]) {
+      expect(normalizeWorkspaceSlug(name)).toEqual({ ok: false, error: "invalid_name" })
+    }
+  })
+})
+
+describe("workspacePath", () => {
+  it("resolves the slug under the root", () => {
+    expect(workspacePath("/workspace", "app")).toBe("/workspace/app")
   })
 
-  it("normalizes trailing separators on the root", () => {
-    expect(normalizeWorkspacePath("/workspace/app", "/workspace/")).toEqual({ ok: true, path: "/workspace/app" })
+  it("throws if the slug would escape the root", () => {
+    expect(() => workspacePath("/workspace", "../etc")).toThrow(/escapes_root/)
+  })
+})
+
+describe("isInsideRoot", () => {
+  it("is true only for paths strictly inside the root", () => {
+    expect(isInsideRoot("/workspace", "/workspace/app")).toBe(true)
+    expect(isInsideRoot("/workspace", "/workspace")).toBe(false)
+    expect(isInsideRoot("/workspace", "/workspace/../etc")).toBe(false)
+    expect(isInsideRoot("/workspace", "/other/app")).toBe(false)
   })
 })
 
@@ -38,18 +59,29 @@ describe("workspaceName", () => {
   })
 })
 
-describe("workspacePathExists", () => {
-  it("detects directories, files and missing paths", () => {
-    const dir = mkdtempSync(join(tmpdir(), "masterhand-ws-"))
+describe("createWorkspaceDir / removeWorkspaceDir", () => {
+  it("creates nested folders and deletes them recursively", () => {
+    const root = mkdtempSync(join(tmpdir(), "masterhand-ws-"))
     try {
-      const sub = join(dir, "project")
-      mkdirSync(sub)
-      writeFileSync(join(dir, "file.txt"), "x")
-      expect(workspacePathExists(sub)).toBe(true)
-      expect(workspacePathExists(join(dir, "file.txt"))).toBe(false)
-      expect(workspacePathExists(join(dir, "missing"))).toBe(false)
+      const path = join(root, "nested", "project")
+      createWorkspaceDir(path)
+      expect(existsSync(path)).toBe(true)
+
+      writeFileSync(join(path, "file.txt"), "x")
+      removeWorkspaceDir(path)
+      expect(existsSync(path)).toBe(false)
+      expect(existsSync(join(root, "nested"))).toBe(true)
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("removing a missing folder is a no-op", () => {
+    const root = mkdtempSync(join(tmpdir(), "masterhand-ws-"))
+    try {
+      expect(() => removeWorkspaceDir(join(root, "missing"))).not.toThrow()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })

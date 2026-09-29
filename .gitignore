@@ -30,9 +30,9 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 
-# Agent projects (local data, not versioned)
-projects/*
-!projects/.gitkeep
+# Workspaces (local data, not versioned)
+workspace/*
+!workspace/.gitkeep
 
 # Playwright / E2E
 .playwright-mcp/

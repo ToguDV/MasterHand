@@ -37,11 +37,11 @@ Other rules:
 | `GET` | `/api/events` | SSE | Re-emits opencode events from **all projects** (hub on `/global/event`); first event `hello` with `{ connected }`; `ping` every 25s |
 | `GET` | `/api/devices` | `{ devices: DeviceRecord[] }` | Lists registered devices |
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
-| `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Registered project folders, oldest first |
-| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "path": "/workspace/app", "name": "App" }`. `path` must be absolute, exist as a directory on the BFF filesystem and, when `WORKSPACES_ROOT` is set, live under it; `name` defaults to the folder name. `400` invalid path, `403` outside root, `404` folder not found, `409` already registered |
-| `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list. Files and opencode sessions are **not** deleted |
+| `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Workspaces, oldest first |
+| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "name": "my-project" }`. The BFF creates `<WORKSPACES_ROOT>/<name>` (mkdir -p) and returns it. `name` becomes both the folder and the display name. `400` invalid name (separators, traversal, leading dot, >64 chars), `409` already registered |
+| `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list. With `?deleteFiles=1` it also deletes the folder and its files from disk (only when the path is inside `WORKSPACES_ROOT`, otherwise `403`); without it, files and opencode sessions are untouched. `404` unknown workspace |
 
-`workspace` shape: `{ id, name, path, createdAt }`. Workspaces are a MasterHand-side registry: opencode has no project-deletion endpoint, so deleting a workspace only forgets it here.
+`workspace` shape: `{ id, name, path, createdAt }`. Each workspace is a subfolder that MasterHand creates and owns under `WORKSPACES_ROOT`, so it is always a single, isolated directory. opencode has no project-deletion endpoint, so deleting the record in MasterHand (optionally with its files) is how a workspace goes away.
 
 ## Proxy to opencode
 
@@ -79,5 +79,5 @@ curl -X POST https://your-origin.example/api/devices \
 | `OPENCODE_URL` | `http://127.0.0.1:4096` | opencode upstream |
 | `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` | — / `opencode` | Basic auth to opencode |
 | `DATA_DIR` | `./data` | SQLite path (`/data` in Docker) |
-| `WORKSPACES_ROOT` | — | Optional. When set, registered workspace paths must live under it (e.g. `/workspace` in Docker) |
+| `WORKSPACES_ROOT` | `./workspace` | Base directory where workspaces are created as subfolders. Point it at the same folder opencode sees (e.g. `/workspace` in Docker) |
 | `WEB_DIST` | `apps/web/dist` | Web build served by the BFF |

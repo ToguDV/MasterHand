@@ -133,7 +133,7 @@ describe("client routes", () => {
     await client.api.statuses()
     await client.api.projects()
     await client.workspaces.list()
-    await client.workspaces.create({ path: "/workspace/app" })
+    await client.workspaces.create({ name: "app" })
     await client.workspaces.remove("ws/1")
 
     const routes = calls.map((call) => `${call.init?.method ?? "GET"} ${call.url}`)
@@ -209,6 +209,13 @@ describe("workspaces", () => {
     const { fetchImpl } = recordingFetch(() => jsonResponse({ workspaces: [{ id: "ws_1" }] }))
     const client = createClient({ fetchImpl })
     expect(await client.workspaces.list()).toEqual([{ id: "ws_1" }])
+  })
+
+  it("adds the deleteFiles flag when removing a workspace", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => new Response(null, { status: 204 }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+    await client.workspaces.remove("ws_1", { deleteFiles: true })
+    expect(calls[0]?.url).toBe("https://mh.example/api/workspaces/ws_1?deleteFiles=1")
   })
 })
 
