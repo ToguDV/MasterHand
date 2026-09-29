@@ -1,7 +1,13 @@
 import type { Context } from "hono"
 import type { Config } from "./config.js"
 
-const FORWARD_REQUEST_HEADERS = ["content-type", "accept", "accept-language", "user-agent"]
+const FORWARD_REQUEST_HEADERS = [
+  "content-type",
+  "accept",
+  "accept-language",
+  "user-agent",
+  "x-opencode-directory",
+]
 const FORWARD_RESPONSE_HEADERS = ["content-type", "cache-control", "etag", "last-modified"]
 
 export function createOpencodeProxy(config: Config, fetchImpl: typeof fetch = fetch) {

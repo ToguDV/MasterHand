@@ -4,7 +4,7 @@ import { serve } from "@hono/node-server"
 import { createApp } from "../src/app.js"
 import type { Config } from "../src/config.js"
 import { createEventHub, type EventHub } from "../src/events.js"
-import { createMemoryStore, type DeviceRecord, type DeviceStore } from "../src/store.js"
+import { createMemoryStore, type DeviceRecord, type Store } from "../src/store.js"
 
 export async function waitFor(predicate: () => boolean, timeoutMs = 8000, intervalMs = 25): Promise<void> {
   const started = Date.now()
@@ -17,7 +17,7 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 8000, interv
 
 export interface MockOpencode {
   url: string
-  requests: { method: string; path: string; authorization?: string; body?: string }[]
+  requests: { method: string; path: string; authorization?: string; directory?: string; body?: string }[]
   emit(event: unknown): void
   close(): Promise<void>
 }
@@ -37,6 +37,7 @@ export async function startMockOpencode(): Promise<MockOpencode> {
         method: req.method ?? "",
         path,
         authorization: req.headers.authorization,
+        directory: typeof req.headers["x-opencode-directory"] === "string" ? req.headers["x-opencode-directory"] : undefined,
         body: body || undefined,
       })
 
@@ -98,6 +99,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     dataDir: "/tmp/masterhand-test",
     webDist: null,
     allowedOrigins: [],
+    workspacesRoot: null,
     ...overrides,
   }
 }
@@ -105,7 +107,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 export interface TestApp {
   url: string
   config: Config
-  store: DeviceStore
+  store: Store
   hub: EventHub
   close(): Promise<void>
 }

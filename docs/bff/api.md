@@ -37,12 +37,17 @@ Other rules:
 | `GET` | `/api/events` | SSE | Re-emits opencode events from **all projects** (hub on `/global/event`); first event `hello` with `{ connected }`; `ping` every 25s |
 | `GET` | `/api/devices` | `{ devices: DeviceRecord[] }` | Lists registered devices |
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
+| `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Registered project folders, oldest first |
+| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "path": "/workspace/app", "name": "App" }`. `path` must be absolute; `name` defaults to the folder name. `400` invalid path, `403` outside `WORKSPACES_ROOT`, `409` already registered |
+| `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list. Files and opencode sessions are **not** deleted |
+
+`workspace` shape: `{ id, name, path, createdAt }`. Workspaces are a MasterHand-side registry: opencode has no project-deletion endpoint, so deleting a workspace only forgets it here.
 
 ## Proxy to opencode
 
 | Method | Route | Notes |
 |---|---|---|
-| `*` | `/api/oc/*` | Forwards to `OPENCODE_URL` (e.g. `http://opencode:4096`) injecting `Authorization: Basic` with `OPENCODE_SERVER_PASSWORD`. The `/api/oc` prefix is removed: `/api/oc/global/health` → `GET /global/health`. Preserves method, body, query and `content-type`. SSE streaming without buffering (`cache-control: no-cache`, `x-accel-buffering: no`). `502` if opencode does not answer. |
+| `*` | `/api/oc/*` | Forwards to `OPENCODE_URL` (e.g. `http://opencode:4096`) injecting `Authorization: Basic` with `OPENCODE_SERVER_PASSWORD`. The `/api/oc` prefix is removed: `/api/oc/global/health` → `GET /global/health`. Preserves method, body, query and `content-type`. Forwards the `x-opencode-directory` header (used to target a workspace on mutations) and preserves the `directory` query parameter (used on GET). SSE streaming without buffering (`cache-control: no-cache`, `x-accel-buffering: no`). `502` if opencode does not answer. |
 
 Examples:
 
@@ -74,4 +79,5 @@ curl -X POST https://your-origin.example/api/devices \
 | `OPENCODE_URL` | `http://127.0.0.1:4096` | opencode upstream |
 | `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` | — / `opencode` | Basic auth to opencode |
 | `DATA_DIR` | `./data` | SQLite path (`/data` in Docker) |
+| `WORKSPACES_ROOT` | — | Optional. When set, registered workspace paths must live under it (e.g. `/workspace` in Docker) |
 | `WEB_DIST` | `apps/web/dist` | Web build served by the BFF |

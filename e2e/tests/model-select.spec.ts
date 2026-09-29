@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test"
+import { addWorkspace, login } from "./helpers"
 
 test("limits model options and searches the rest", async ({ page }) => {
-  await page.goto("/")
-  await page.locator("#password").fill("e2e-password")
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await login(page)
+  await addWorkspace(page)
 
   await page.getByRole("button", { name: "+ New" }).click()
 
@@ -27,9 +27,8 @@ test("limits model options and searches the rest", async ({ page }) => {
 })
 
 test("remembers the last used model for new sessions", async ({ page }) => {
-  await page.goto("/")
-  await page.locator("#password").fill("e2e-password")
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await login(page)
+  await addWorkspace(page)
   await page.getByRole("button", { name: "+ New" }).click()
 
   const modelButton = page.getByRole("button", { name: "Model", exact: true })

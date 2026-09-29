@@ -47,6 +47,21 @@ Verified on **2026-09-27** against the [official server docs](https://opencode.a
 | `POST` | `/session/:id/command` | Run slash command |
 | `POST` | `/session/:id/shell` | Run shell command (permission required) |
 
+### Projects and working directories
+
+| Method | Route | Usage |
+|---|---|---|
+| `GET` | `/project` | List known projects (`{ id, worktree, vcs?, time }`) |
+| `GET` | `/project/current` | Current project |
+
+opencode resolves each request against a **directory** (project root) override, so MasterHand can work on several folders with one server:
+
+- `GET`/`HEAD` requests take `?directory=/abs/path`.
+- Mutations (`POST`/`PATCH`/`DELETE`) take the `x-opencode-directory: <url-encoded path>` header (this mirrors `@opencode-ai/sdk`'s client interceptor).
+- Sessions created with a `directory` are stored with that `directory`; `GET /session?directory=/abs/path` filters by it. The BFF forwards the header and the query parameter unchanged.
+
+Verified on 1.18.32: creating a session with a `directory` registers the project; `DELETE /session/:id` deletes the session and its data.
+
 ### Agents, configuration and providers
 
 | Method | Route | Usage |

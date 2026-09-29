@@ -132,6 +132,9 @@ describe("client routes", () => {
     await client.api.config()
     await client.api.statuses()
     await client.api.projects()
+    await client.workspaces.list()
+    await client.workspaces.create({ path: "/workspace/app" })
+    await client.workspaces.remove("ws/1")
 
     const routes = calls.map((call) => `${call.init?.method ?? "GET"} ${call.url}`)
     expect(routes).toEqual([
@@ -152,6 +155,9 @@ describe("client routes", () => {
       "GET https://mh.example/api/oc/config",
       "GET https://mh.example/api/oc/session/status",
       "GET https://mh.example/api/oc/project",
+      "GET https://mh.example/api/workspaces",
+      "POST https://mh.example/api/workspaces",
+      "DELETE https://mh.example/api/workspaces/ws%2F1",
     ])
   })
 
@@ -167,6 +173,42 @@ describe("client routes", () => {
     await client.auth.login("pw")
     const headers = new Headers(calls[0]?.init?.headers)
     expect(headers.get("content-type")).toBe("application/json")
+  })
+})
+
+describe("workspace directory routing", () => {
+  it("appends the directory as a query parameter on GET", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse([]))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.listSessions("/workspace/my app")
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session?directory=%2Fworkspace%2Fmy%20app")
+    expect(new Headers(calls[0]?.init?.headers).has("x-opencode-directory")).toBe(false)
+  })
+
+  it("sends the directory as a header on mutations", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ id: "ses_1" }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.createSession("/workspace/app")
+    const headers = new Headers(calls[0]?.init?.headers)
+    expect(headers.get("x-opencode-directory")).toBe("%2Fworkspace%2Fapp")
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session")
+  })
+
+  it("omits the directory when none is given", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse([]))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+    await client.api.listSessions()
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session")
+  })
+})
+
+describe("workspaces", () => {
+  it("unwraps the workspace list", async () => {
+    const { fetchImpl } = recordingFetch(() => jsonResponse({ workspaces: [{ id: "ws_1" }] }))
+    const client = createClient({ fetchImpl })
+    expect(await client.workspaces.list()).toEqual([{ id: "ws_1" }])
   })
 })
 

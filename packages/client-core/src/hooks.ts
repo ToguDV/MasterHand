@@ -12,6 +12,9 @@ export const queryKeys = {
   agents: ["agents"] as const,
   providers: ["providers"] as const,
   config: ["config"] as const,
+  workspaces: ["workspaces"] as const,
+  /** Session list scoped to a workspace; `queryKeys.sessions` stays the invalidation prefix. */
+  sessionsFor: (directory?: string | null) => ["sessions", directory ?? null] as const,
 }
 
 export function useBffStatus(client: Client, refetchInterval: number | false = false) {
@@ -23,12 +26,25 @@ export function useBffStatus(client: Client, refetchInterval: number | false = f
   })
 }
 
-export function useSessions(client: Client, enabled: boolean, refetchInterval: number | false = 10_000) {
+export function useSessions(
+  client: Client,
+  enabled: boolean,
+  refetchInterval: number | false = 10_000,
+  directory?: string | null,
+) {
   return useQuery({
-    queryKey: queryKeys.sessions,
-    queryFn: () => client.api.listSessions(),
+    queryKey: queryKeys.sessionsFor(directory),
+    queryFn: () => client.api.listSessions(directory),
     enabled,
     refetchInterval,
+  })
+}
+
+export function useWorkspaces(client: Client, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.workspaces,
+    queryFn: () => client.workspaces.list(),
+    enabled,
   })
 }
 
@@ -44,11 +60,11 @@ export function useSessionStatuses(client: Client, enabled: boolean, connected: 
 export function useMessages(
   client: Client,
   sessionID: string | null,
-  options: { connected: boolean; busy: boolean },
+  options: { connected: boolean; busy: boolean; directory?: string | null },
 ) {
   return useQuery({
     queryKey: queryKeys.messages(sessionID ?? ""),
-    queryFn: () => client.api.messages(sessionID!),
+    queryFn: () => client.api.messages(sessionID!, options.directory),
     enabled: Boolean(sessionID),
     staleTime: 30_000,
     refetchOnWindowFocus: false,

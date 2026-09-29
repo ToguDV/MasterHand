@@ -40,6 +40,7 @@ export {
   useProviders,
   useSessionStatuses,
   useSessions,
+  useWorkspaces,
   type EventHandlerCallbacks,
   type UseEventStreamOptions,
 } from "./hooks"

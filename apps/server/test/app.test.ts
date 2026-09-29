@@ -71,6 +71,91 @@ describe("/api/status", () => {
   })
 })
 
+describe("/api/workspaces", () => {
+  it("creates, lists and removes workspaces (default name from the path)", async () => {
+    app = await startTestApp()
+    const cookie = await login(app.url)
+
+    const created = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/my-app/" }),
+    })
+    expect(created.status).toBe(201)
+    const body = (await created.json()) as { workspace: { id: string; name: string; path: string } }
+    expect(body.workspace).toMatchObject({ name: "my-app", path: "/workspace/my-app" })
+
+    const listed = await fetch(`${app.url}/api/workspaces`, { headers: { cookie } })
+    expect(listed.status).toBe(200)
+    expect((await listed.json()) as { workspaces: unknown[] }).toMatchObject({
+      workspaces: [{ id: body.workspace.id }],
+    })
+
+    const removed = await fetch(`${app.url}/api/workspaces/${body.workspace.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    })
+    expect(removed.status).toBe(200)
+    const empty = await fetch(`${app.url}/api/workspaces`, { headers: { cookie } })
+    expect((await empty.json()) as { workspaces: unknown[] }).toMatchObject({ workspaces: [] })
+  })
+
+  it("honors a custom name", async () => {
+    app = await startTestApp()
+    const cookie = await login(app.url)
+    const response = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/app", name: "  Cool app  " }),
+    })
+    const body = (await response.json()) as { workspace: { name: string } }
+    expect(body.workspace.name).toBe("Cool app")
+  })
+
+  it("rejects invalid and duplicate paths", async () => {
+    app = await startTestApp()
+    const cookie = await login(app.url)
+
+    const invalid = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ path: "relative" }),
+    })
+    expect(invalid.status).toBe(400)
+
+    const payload = JSON.stringify({ path: "/workspace/app" })
+    const first = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: payload,
+    })
+    expect(first.status).toBe(201)
+    const duplicate = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: payload,
+    })
+    expect(duplicate.status).toBe(409)
+  })
+
+  it("enforces the configured root", async () => {
+    app = await startTestApp({ config: { workspacesRoot: "/workspace" } })
+    const cookie = await login(app.url)
+    const outside = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ path: "/etc" }),
+    })
+    expect(outside.status).toBe(403)
+  })
+
+  it("requires authentication", async () => {
+    app = await startTestApp()
+    const response = await fetch(`${app.url}/api/workspaces`)
+    expect(response.status).toBe(401)
+  })
+})
+
 describe("origin checks", () => {
   it("allows requests whose origin matches the request host", async () => {
     app = await startTestApp()

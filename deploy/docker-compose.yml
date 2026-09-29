@@ -13,6 +13,8 @@ services:
       OPENCODE_URL: http://opencode:4096
       DATA_DIR: /data
       WEB_DIST: apps/web/dist
+      # Registered workspaces must live under the projects root mounted into opencode.
+      WORKSPACES_ROOT: /workspace
     volumes:
       - masterhand_data:/data
     ports:
@@ -38,7 +40,7 @@ services:
     volumes:
       - opencode_config:/home/node/.config/opencode
       - opencode_data:/home/node/.local/share/opencode
-      - ../projects:/workspace
+      - ${PROJECTS_ROOT:-../projects}:/workspace
     working_dir: /workspace
     expose:
       - "4096"

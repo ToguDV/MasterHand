@@ -71,12 +71,20 @@ function openStream(res: ServerResponse): void {
   res.on("close", () => sseClients.delete(res))
 }
 
-function createSession(): Record<string, unknown> {
+function requestDirectory(req: IncomingMessage, url: URL): string {
+  const query = url.searchParams.get("directory")
+  if (query) return query
+  const header = req.headers["x-opencode-directory"]
+  if (typeof header === "string") return decodeURIComponent(header)
+  return "/e2e/project"
+}
+
+function createSession(directory = "/e2e/project"): Record<string, unknown> {
   const session = {
     id: nextId("ses"),
     slug: "e2e-session",
     projectID: "global",
-    directory: "/e2e/project",
+    directory,
     title: "",
     version: "1.0.0",
     time: { created: now(), updated: now() },
@@ -195,8 +203,12 @@ const server = createServer((req, res) => {
   void (async () => {
     if (req.method === "GET" && path === "/global/health") return json(res, 200, { healthy: true, version: "1.18.32" })
     if (req.method === "GET" && path === "/global/event") return openStream(res)
-    if (req.method === "GET" && path === "/session") return json(res, 200, [...sessions.values()])
-    if (req.method === "POST" && path === "/session") return json(res, 200, createSession())
+    if (req.method === "GET" && path === "/session") {
+      const directory = url.searchParams.get("directory")
+      const list = [...sessions.values()].filter((session) => !directory || session.directory === directory)
+      return json(res, 200, list)
+    }
+    if (req.method === "POST" && path === "/session") return json(res, 200, createSession(requestDirectory(req, url)))
     if (req.method === "GET" && path === "/session/status") return json(res, 200, {})
     if (req.method === "GET" && path === "/project") return json(res, 200, [])
     if (req.method === "GET" && path === "/config") return json(res, 200, { model: "test/test-model" })
@@ -250,6 +262,13 @@ const server = createServer((req, res) => {
         return
       }
       if (req.method === "POST" && segments[2] === "abort") return json(res, 200, true)
+      if (req.method === "DELETE" && segments.length === 2) {
+        const session = sessions.get(sessionID)
+        sessions.delete(sessionID)
+        conversations.delete(sessionID)
+        if (session) broadcast({ type: "session.deleted", properties: { info: session } })
+        return json(res, 200, true)
+      }
       if (req.method === "POST" && segments[2] === "permissions" && segments[3]) {
         const resolve = pendingPermissions.get(segments[3])
         if (resolve) {

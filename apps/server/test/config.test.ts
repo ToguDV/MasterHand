@@ -69,6 +69,12 @@ describe("loadConfig", () => {
     expect(config.allowedOrigins.sort()).toEqual(["https://a.example", "https://b.example"])
   })
 
+  it("parses the optional workspaces root", () => {
+    expect(loadConfig(env()).workspacesRoot).toBeNull()
+    expect(loadConfig(env({ WORKSPACES_ROOT: " /workspace " })).workspacesRoot).toBe("/workspace")
+    expect(loadConfig(env({ WORKSPACES_ROOT: "" })).workspacesRoot).toBeNull()
+  })
+
   it("adds the local dev origins outside production", () => {
     const dev = loadConfig(env())
     expect(dev.allowedOrigins).toContain("http://localhost:5173")

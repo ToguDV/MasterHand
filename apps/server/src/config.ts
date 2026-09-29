@@ -9,6 +9,8 @@ export interface Config {
   dataDir: string
   webDist: string | null
   allowedOrigins: string[]
+  /** When set, registered workspaces must live under this directory. */
+  workspacesRoot: string | null
 }
 
 function intFromEnv(value: string | undefined, fallback: number): number {
@@ -61,5 +63,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: env.DATA_DIR ?? "./data",
     webDist: env.WEB_DIST === "" ? null : (env.WEB_DIST ?? "apps/web/dist"),
     allowedOrigins: [...allowedOrigins],
+    workspacesRoot: env.WORKSPACES_ROOT?.trim() || null,
   }
 }

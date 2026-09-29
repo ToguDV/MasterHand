@@ -43,6 +43,18 @@ export interface DeviceRecord {
   lastUsedAt: number
 }
 
+export interface WorkspaceRecord {
+  id: string
+  name: string
+  path: string
+  createdAt: number
+}
+
+export interface CreateWorkspaceInput {
+  path: string
+  name?: string
+}
+
 export interface BffStatus {
   ok: boolean
   opencode?: {

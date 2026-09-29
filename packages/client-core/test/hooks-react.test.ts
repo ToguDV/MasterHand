@@ -15,6 +15,7 @@ import {
   useProviders,
   useSessions,
   useSessionStatuses,
+  useWorkspaces,
 } from "../src/hooks"
 
 afterEach(cleanup)
@@ -34,7 +35,15 @@ function makeClient(stream = makeEventStream()) {
     config: vi.fn(async () => ({ model: "x/y" })),
   }
   const eventStream = vi.fn((_options: Parameters<Client["eventStream"]>[0]) => stream)
-  return { client: { baseUrl: "", auth, api, eventStream } as unknown as Client, stream, auth, api, eventStream }
+  const workspaces = { list: vi.fn(async () => []) }
+  return {
+    client: { baseUrl: "", auth, api, workspaces, eventStream } as unknown as Client,
+    stream,
+    auth,
+    api,
+    workspaces,
+    eventStream,
+  }
 }
 
 function newQueryClient(): QueryClient {
@@ -90,7 +99,25 @@ describe("query hooks", () => {
       wrapper: wrapper(qc),
     })
     await waitFor(() => expect(enabled.result.current.isSuccess).toBe(true))
-    expect(api.messages).toHaveBeenCalledWith("ses_1")
+    expect(api.messages).toHaveBeenCalledWith("ses_1", undefined)
+  })
+
+  it("useSessions scopes the fetch to a workspace directory", async () => {
+    const qc = newQueryClient()
+    const { client, api } = makeClient()
+    const { result } = renderHook(() => useSessions(client, true, false, "/workspace/app"), {
+      wrapper: wrapper(qc),
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(api.listSessions).toHaveBeenCalledWith("/workspace/app")
+  })
+
+  it("useWorkspaces loads the registered workspaces", async () => {
+    const qc = newQueryClient()
+    const { client, workspaces } = makeClient()
+    const { result } = renderHook(() => useWorkspaces(client), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(workspaces.list).toHaveBeenCalledTimes(1)
   })
 
   it("useAgents, useProviders and useConfig load their resources", async () => {

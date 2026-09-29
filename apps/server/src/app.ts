@@ -15,17 +15,19 @@ import {
 import type { Config } from "./config.js"
 import type { EventHub } from "./events.js"
 import { createOpencodeProxy } from "./proxy.js"
-import type { DeviceStore } from "./store.js"
+import type { Store } from "./store.js"
+import { normalizeWorkspacePath, workspaceName } from "./workspaces.js"
 
 export interface AppDeps {
   config: Config
-  store: DeviceStore
+  store: Store
   hub: EventHub
   fetchImpl?: typeof fetch
 }
 
 const KEEPALIVE_MS = 25_000
 const MAX_DEVICE_NAME_LENGTH = 64
+const MAX_WORKSPACE_NAME_LENGTH = 64
 
 function clientIp(header: string | undefined): string {
   return header?.split(",")[0]?.trim() || "unknown"
@@ -158,6 +160,40 @@ export function createApp(deps: AppDeps): Hono {
 
   api.delete("/devices/:id", (c) => {
     deps.store.remove(c.req.param("id"))
+    return c.json({ ok: true })
+  })
+
+  api.get("/workspaces", (c) => c.json({ workspaces: deps.store.listWorkspaces() }))
+
+  api.post("/workspaces", async (c) => {
+    let body: { path?: unknown; name?: unknown }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "bad_request" }, 400)
+    }
+
+    const result = normalizeWorkspacePath(body.path, config.workspacesRoot)
+    if (!result.ok) {
+      return result.error === "outside_root"
+        ? c.json({ error: "outside_root" }, 403)
+        : c.json({ error: "invalid_path" }, 400)
+    }
+    if (deps.store.getWorkspaceByPath(result.path)) {
+      return c.json({ error: "already_exists" }, 409)
+    }
+
+    const name =
+      typeof body.name === "string" && body.name.trim()
+        ? body.name.trim().slice(0, MAX_WORKSPACE_NAME_LENGTH)
+        : workspaceName(result.path)
+    const workspace = { id: randomUUID(), name, path: result.path, createdAt: Date.now() }
+    deps.store.createWorkspace(workspace)
+    return c.json({ workspace }, 201)
+  })
+
+  api.delete("/workspaces/:id", (c) => {
+    deps.store.removeWorkspace(c.req.param("id"))
     return c.json({ ok: true })
   })
 

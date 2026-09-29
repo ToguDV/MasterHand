@@ -105,6 +105,13 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 - On (re)connect, `sessions`, `messages` and `statuses` are invalidated to reconcile missed events.
 - Fallback without SSE: connection down → polling (messages every 5s, statuses every 4s); active turn → messages every 3s.
 
+### 4.6 Workspaces (multiple project folders)
+
+- A **workspace** is a project folder registered in the BFF (`workspaces` table in SQLite: `id`, `name`, `path`). Registration validates that the path is absolute and, when `WORKSPACES_ROOT` is set, that it lives under that root (the directory is mounted into the opencode container).
+- Clients pick a workspace; every opencode call carries its `path` as the `directory` override (query on GET, `x-opencode-directory` header on mutations). Sessions are therefore created in and listed for the selected folder.
+- Deleting a workspace only forgets it in MasterHand: **files and opencode sessions are untouched** (opencode has no project deletion). Deleting a session calls `DELETE /session/:id` with the workspace directory and removes its data.
+- The BFF persists the list; the filesystem and project data remain owned by opencode.
+
 ## 5. Security model
 
 | Layer | Measure |
@@ -156,6 +163,7 @@ deploy/
 | ADR-8 | Bearer tokens for native clients, cookie for web | React Native does not handle cookies like a browser; tokens enable revocable multi-device access | Cookie-only (fragile on native), token-only everywhere (loses HttpOnly/CSRF benefits on web) |
 | ADR-9 | In-app SSE notifications for the MVP; native push deferred | No APNs/FCM accounts or extra infrastructure required | Native push now (cost), Web Push (implies service worker / PWA) |
 | ADR-10 | Adopt the YAGNI ladder as a written guideline in `AGENTS.md`; do not install the third-party `ponytail` plugin | Keeps the minimalism principle without an always-on external prompt that would fight documented decisions or alter subagent behavior | Installing the `ponytail` plugin (third-party supply chain, injects rules into every turn and subagent, conflicts with the spec-driven approach) |
+| ADR-11 | Workspaces are a MasterHand-side registry (SQLite) of project folders; opencode is targeted per request with its `directory` override | opencode has no project-deletion endpoint, so a deletable "workspace" must be owned by MasterHand; the same server already supports multiple projects via `directory` (query on GET, `x-opencode-directory` header on mutations) | Listing `GET /project` directly (no deletion possible), opencode's experimental v2 workspaces (git worktrees, not folders, unstable) |
 
 ## 8. Risks
 

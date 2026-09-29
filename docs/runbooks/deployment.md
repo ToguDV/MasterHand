@@ -25,7 +25,10 @@ Fill in `deploy/.env`:
 | `COOKIE_SECURE` | Set `true` behind HTTPS, `false` only for local HTTP |
 | `ALLOWED_ORIGINS` | Extra origins allowed on mutating requests (comma-separated) |
 | `MASTERHAND_BIND` / `MASTERHAND_PORT` | Host bind address and port for the BFF (default `0.0.0.0:8787`; use `127.0.0.1` when the proxy runs on the host) |
+| `PROJECTS_ROOT` | Host directory mounted into opencode as `/workspace` (default `../projects`). Register its subfolders as workspaces from the UI |
 | `OPENCODE_VERSION` | Pinned opencode version |
+
+> **Workspaces:** from the UI you register project folders as workspaces. They must live under the projects root mounted into opencode (`/workspace` in the container, i.e. `PROJECTS_ROOT` on the host), enforced by the BFF's `WORKSPACES_ROOT`. Removing a workspace only forgets it in MasterHand; files and sessions are untouched.
 
 ## 3. Start the stack
 

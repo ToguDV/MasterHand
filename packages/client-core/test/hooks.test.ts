@@ -26,6 +26,11 @@ describe("queryKeys", () => {
     expect(queryKeys.messages("ses_1")).toEqual(["messages", "ses_1"])
     expect(queryKeys.sessions).toEqual(["sessions"])
   })
+
+  it("scopes session keys by workspace directory", () => {
+    expect(queryKeys.sessionsFor("/workspace/app")).toEqual(["sessions", "/workspace/app"])
+    expect(queryKeys.sessionsFor()).toEqual(["sessions", null])
+  })
 })
 
 describe("createEventHandler", () => {
