@@ -1,9 +1,13 @@
 import { useState } from "react"
 import {
+  isTaskTool,
   splitFences,
+  subagentInfo,
+  subagentOutput,
   toolTitle,
   type MessageWithParts,
   type ReasoningPart,
+  type SubtaskPart,
   type TextPart,
   type ToolPart,
 } from "@masterhand/client-core"
@@ -39,17 +43,20 @@ function ReasoningBlock({ part }: { part: ReasoningPart }) {
   )
 }
 
+function statusDot(status: ToolPart["state"]["status"]): string {
+  return status === "completed"
+    ? "bg-emerald-400"
+    : status === "error"
+      ? "bg-red-400"
+      : status === "running"
+        ? "animate-pulse bg-amber-400"
+        : "bg-zinc-600"
+}
+
 function ToolCall({ part }: { part: ToolPart }) {
   const [open, setOpen] = useState(false)
   const state = part.state
-  const dot =
-    state.status === "completed"
-      ? "bg-emerald-400"
-      : state.status === "error"
-        ? "bg-red-400"
-        : state.status === "running"
-          ? "animate-pulse bg-amber-400"
-          : "bg-zinc-600"
+  const dot = statusDot(state.status)
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/60">
@@ -78,16 +85,120 @@ function ToolCall({ part }: { part: ToolPart }) {
   )
 }
 
-function PartView({ part }: { part: MessageWithParts["parts"][number] }) {
+function SubagentCall({
+  part,
+  onOpenSession,
+}: {
+  part: ToolPart
+  onOpenSession?: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const state = part.state
+  const info = subagentInfo(part)
+  const output = subagentOutput(part)
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/5">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
+      >
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(state.status)}`} />
+        <span className="shrink-0 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-300">
+          Subagent
+        </span>
+        <span className="shrink-0 font-mono text-xs text-indigo-200">{info.name}</span>
+        <span className="min-w-0 flex-1 truncate text-zinc-300">{info.description}</span>
+        {info.background && (
+          <span className="shrink-0 rounded bg-zinc-700/60 px-1.5 py-0.5 text-[10px] text-zinc-300">background</span>
+        )}
+        <span className="shrink-0 text-xs text-zinc-500">{state.status}</span>
+      </button>
+
+      {open && (
+        <div className="space-y-2 border-t border-indigo-500/20 px-3 py-2">
+          {info.prompt && (
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Prompt</p>
+              <pre className="scroll-thin max-h-60 overflow-auto whitespace-pre-wrap text-xs text-zinc-400">
+                {info.prompt}
+              </pre>
+            </div>
+          )}
+          {output && (
+            <div className="border-t border-indigo-500/20 pt-2">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Result</p>
+              <pre className="scroll-thin max-h-60 overflow-auto whitespace-pre-wrap text-xs text-zinc-300">
+                {output}
+              </pre>
+            </div>
+          )}
+          {state.status === "error" && <p className="text-xs text-red-400">{state.error}</p>}
+        </div>
+      )}
+
+      {info.sessionID && onOpenSession && (
+        <div className="border-t border-indigo-500/20 px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => onOpenSession(info.sessionID!)}
+            className="text-xs font-medium text-indigo-300 hover:text-indigo-200"
+          >
+            Open session →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SubtaskCall({ part }: { part: SubtaskPart }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/5">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
+      >
+        <span className="shrink-0 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-300">
+          Subagent
+        </span>
+        <span className="shrink-0 font-mono text-xs text-indigo-200">{part.agent}</span>
+        <span className="min-w-0 flex-1 truncate text-zinc-300">{part.description}</span>
+      </button>
+      {open && (
+        <div className="border-t border-indigo-500/20 px-3 py-2">
+          <pre className="scroll-thin max-h-60 overflow-auto whitespace-pre-wrap text-xs text-zinc-400">
+            {part.prompt}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PartView({
+  part,
+  onOpenSession,
+}: {
+  part: MessageWithParts["parts"][number]
+  onOpenSession?: (id: string) => void
+}) {
   switch (part.type) {
     case "text":
       return <MarkdownText text={(part as TextPart).text} />
     case "reasoning":
       return <ReasoningBlock part={part as ReasoningPart} />
     case "tool":
-      return <ToolCall part={part as ToolPart} />
+      return isTaskTool(part) ? (
+        <SubagentCall part={part} onOpenSession={onOpenSession} />
+      ) : (
+        <ToolCall part={part as ToolPart} />
+      )
     case "subtask":
-      return <p className="text-sm text-zinc-500">Subtask: {part.description}</p>
+      return <SubtaskCall part={part as SubtaskPart} />
     default:
       return null
   }
@@ -108,7 +219,13 @@ export function UserBubble({ entry }: { entry: MessageWithParts }) {
   )
 }
 
-export function AssistantBlock({ entry }: { entry: MessageWithParts }) {
+export function AssistantBlock({
+  entry,
+  onOpenSession,
+}: {
+  entry: MessageWithParts
+  onOpenSession?: (id: string) => void
+}) {
   const visible = entry.parts.filter((part) => part.type !== "step-start" && part.type !== "step-finish")
   const info = entry.info
   const streaming = info.role === "assistant" && info.time.completed === undefined
@@ -120,7 +237,7 @@ export function AssistantBlock({ entry }: { entry: MessageWithParts }) {
   return (
     <div className="flex flex-col gap-2">
       {visible.map((part) => (
-        <PartView key={part.id} part={part} />
+        <PartView key={part.id} part={part} onOpenSession={onOpenSession} />
       ))}
 
       {streaming && visible.length === 0 && (

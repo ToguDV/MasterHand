@@ -8,6 +8,9 @@ interface Part {
   messageID: string
   type: string
   text?: string
+  tool?: string
+  callID?: string
+  state?: Record<string, unknown>
 }
 
 interface MessageInfo {
@@ -108,9 +111,123 @@ function appendPart(sessionID: string, entry: ConversationEntry, part: Part): vo
   broadcast({ type: "message.part.updated", properties: { part: { ...part } } })
 }
 
+async function runSubagentPrompt(sessionID: string, text: string): Promise<void> {
+  const conversation = conversations.get(sessionID)
+  if (!conversation) return
+
+  broadcast({ type: "session.status", properties: { sessionID, status: { type: "busy" } } })
+
+  const user: ConversationEntry = {
+    info: {
+      id: nextId("msg"),
+      sessionID,
+      role: "user",
+      time: { created: now() },
+      agent: "build",
+      model: { providerID: "test", modelID: "test-model" },
+    },
+    parts: [],
+  }
+  conversation.push(user)
+  broadcast({ type: "message.updated", properties: { info: user.info } })
+  appendPart(sessionID, user, { id: nextId("prt"), sessionID, messageID: user.info.id, type: "text", text })
+
+  await delay(40)
+
+  const child = createSession(sessions.get(sessionID)?.directory as string | undefined)
+  const childID = child.id as string
+  child.parentID = sessionID
+  child.title = "Explore the repository (@explore subagent)"
+  broadcast({ type: "session.updated", properties: { info: child } })
+
+  const childConversation = conversations.get(childID)
+  if (childConversation) {
+    const childAssistant: ConversationEntry = {
+      info: {
+        id: nextId("msg"),
+        sessionID: childID,
+        role: "assistant",
+        time: { created: now(), completed: now() },
+        modelID: "test-model",
+        providerID: "test",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [],
+    }
+    childConversation.push(childAssistant)
+    broadcast({ type: "message.updated", properties: { info: childAssistant.info } })
+    appendPart(childID, childAssistant, {
+      id: nextId("prt"),
+      sessionID: childID,
+      messageID: childAssistant.info.id,
+      type: "text",
+      text: "Found 3 files",
+    })
+  }
+
+  const assistant: ConversationEntry = {
+    info: {
+      id: nextId("msg"),
+      sessionID,
+      role: "assistant",
+      time: { created: now() },
+      modelID: "test-model",
+      providerID: "test",
+      cost: 0.001,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [],
+  }
+  conversation.push(assistant)
+  broadcast({ type: "message.updated", properties: { info: assistant.info } })
+
+  const input = {
+    subagent_type: "explore",
+    description: "Explore the repository",
+    prompt: "List the files in the project",
+  }
+  const task: Part = {
+    id: nextId("prt"),
+    sessionID,
+    messageID: assistant.info.id,
+    type: "tool",
+    callID: nextId("call"),
+    tool: "task",
+    state: {
+      status: "running",
+      input,
+      title: input.description,
+      metadata: { sessionId: childID },
+      time: { start: now() },
+    },
+  }
+  appendPart(sessionID, assistant, task)
+
+  await delay(120)
+
+  task.state = {
+    status: "completed",
+    input,
+    output: `<task id="${childID}" state="completed">\n<summary>Explore completed</summary>\n<task_result>Found 3 files</task_result>\n</task>`,
+    title: input.description,
+    metadata: { sessionId: childID },
+    time: { start: now() - 100, end: now() },
+  }
+  appendPart(sessionID, assistant, task)
+
+  assistant.info.time.completed = now()
+  assistant.info.tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+  broadcast({ type: "message.updated", properties: { info: assistant.info } })
+  broadcast({ type: "session.status", properties: { sessionID, status: { type: "idle" } } })
+  broadcast({ type: "session.idle", properties: { sessionID } })
+}
+
 async function runPrompt(sessionID: string, text: string, body: Record<string, unknown> = {}): Promise<void> {
   const conversation = conversations.get(sessionID)
   if (!conversation) return
+
+  if (text.toLowerCase().includes("subagent")) return runSubagentPrompt(sessionID, text)
 
   const session = sessions.get(sessionID)
   const model = body.model as { providerID?: string; modelID?: string } | undefined

@@ -1,4 +1,4 @@
-import type { Message, Part, TextPart, ToolPart } from "./types"
+import type { Message, Part, SubtaskPart, TextPart, ToolPart } from "./types"
 
 export interface MessageWithParts {
   info: Message
@@ -87,6 +87,50 @@ export function toolTitle(part: ToolPart): string {
   if (state.status === "completed") return state.title
   if (state.status === "error") return "Error"
   return "Preparing…"
+}
+
+/** True when the tool part is opencode's `task` tool (a subagent run). */
+export function isTaskTool(part: Part): part is ToolPart {
+  return part.type === "tool" && part.tool === "task"
+}
+
+export interface SubagentInfo {
+  name: string
+  description: string
+  prompt: string | null
+  sessionID: string | null
+  background: boolean
+}
+
+function readString(source: unknown, key: string): string | null {
+  if (!source || typeof source !== "object") return null
+  const value = (source as Record<string, unknown>)[key]
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+/** Normalizes the `task` tool part into the fields the UI renders. */
+export function subagentInfo(part: ToolPart): SubagentInfo {
+  const state = part.state
+  const metadata = "metadata" in state && state.metadata ? state.metadata : undefined
+  return {
+    name: readString(state.input, "subagent_type") ?? "subagent",
+    description: readString(state.input, "description") ?? toolTitle(part),
+    prompt: readString(state.input, "prompt"),
+    sessionID: readString(metadata, "sessionId"),
+    background: metadata?.background === true,
+  }
+}
+
+/** Inner text of the `task` tool output, without the `<task>`/`<summary>` wrapper tags. */
+export function subagentOutput(part: ToolPart): string | null {
+  const state = part.state
+  if (state.status !== "completed" || !state.output) return null
+  const text = state.output
+    .replace(/<task\b[^>]*>|<\/task>/g, "")
+    .replace(/<summary>[\s\S]*?<\/summary>/g, "")
+    .replace(/<\/?task_(result|error)>/g, "")
+    .trim()
+  return text.length > 0 ? text : null
 }
 
 export function directoryName(directory: string): string {

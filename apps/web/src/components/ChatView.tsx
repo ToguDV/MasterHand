@@ -11,6 +11,7 @@ export function ChatView({
   directory,
   autoAccept,
   onToggleAutoAccept,
+  onOpenSession,
 }: {
   sessionID: string
   busy: boolean
@@ -18,6 +19,7 @@ export function ChatView({
   directory?: string | null
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
+  onOpenSession?: (id: string) => void
 }) {
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
 
@@ -56,7 +58,7 @@ export function ChatView({
             entry.info.role === "user" ? (
               <UserBubble key={entry.info.id} entry={entry} />
             ) : (
-              <AssistantBlock key={entry.info.id} entry={entry} />
+              <AssistantBlock key={entry.info.id} entry={entry} onOpenSession={onOpenSession} />
             ),
           )}
         </div>

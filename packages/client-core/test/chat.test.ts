@@ -5,12 +5,15 @@ import {
   formatRelative,
   hasVisibleParts,
   isStreaming,
+  isTaskTool,
   mergePart,
   messageText,
   removeMessage,
   removePart,
   sessionUsage,
   splitFences,
+  subagentInfo,
+  subagentOutput,
   toolTitle,
   upsertMessage,
   upsertPart,
@@ -199,6 +202,57 @@ describe("message helpers", () => {
     expect(toolTitle(make({ status: "completed", title: "Done" }))).toBe("Done")
     expect(toolTitle(make({ status: "error" }))).toBe("Error")
     expect(toolTitle(make({ status: "pending" }))).toBe("Preparing…")
+  })
+
+  it("detects and normalizes the task subagent tool", () => {
+    const task: ToolPart = {
+      id: "t",
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "task",
+      state: {
+        status: "completed",
+        input: { subagent_type: "explore", description: "Find files", prompt: "look for x" },
+        output: "<task id=\"ses_child\" state=\"completed\">\n<task_result>found it</task_result>\n</task>",
+        title: "Find files",
+        metadata: { sessionId: "ses_child" },
+        time: { start: 1, end: 2 },
+      },
+    }
+    expect(isTaskTool(task)).toBe(true)
+    expect(isTaskTool({ ...task, tool: "bash" })).toBe(false)
+    expect(isTaskTool(textPart("prt_1", "msg_1", "hi"))).toBe(false)
+
+    expect(subagentInfo(task)).toEqual({
+      name: "explore",
+      description: "Find files",
+      prompt: "look for x",
+      sessionID: "ses_child",
+      background: false,
+    })
+    expect(subagentOutput(task)).toBe("found it")
+  })
+
+  it("falls back when a running task has no metadata yet", () => {
+    const running: ToolPart = {
+      id: "t",
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "task",
+      state: {
+        status: "running",
+        input: {},
+        title: "Working",
+        metadata: { sessionId: "ses_child", background: true },
+        time: { start: 1 },
+      },
+    }
+    expect(subagentInfo(running)).toMatchObject({ name: "subagent", description: "Working", background: true })
+    expect(subagentOutput(running)).toBeNull()
   })
 
   it("formats relative timestamps", () => {

@@ -45,6 +45,17 @@ export interface Permission {
  * returns it from `GET /session`, but the published SDK types do not declare
  * the field yet.
  */
+/** Subtask part emitted by opencode when the `task` tool runs a subagent. */
+export interface SubtaskPart {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "subtask"
+  prompt: string
+  description: string
+  agent: string
+}
+
 export interface SessionModel {
   id: string
   providerID: string

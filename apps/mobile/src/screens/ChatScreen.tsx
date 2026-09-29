@@ -15,6 +15,8 @@ export function ChatScreen({
   directory,
   autoAccept,
   onToggleAutoAccept,
+  onOpenSession,
+  parentSessionID,
   onBack,
 }: {
   client: Client
@@ -25,6 +27,8 @@ export function ChatScreen({
   directory?: string | null
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
+  onOpenSession?: (id: string) => void
+  parentSessionID?: string | null
   onBack: () => void
 }) {
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
@@ -58,7 +62,7 @@ export function ChatScreen({
             <Text style={styles.empty}>Write a message to start working with the agent.</Text>
           )
         }
-        renderItem={({ item }) => <MessageBubble entry={item} />}
+        renderItem={({ item }) => <MessageBubble entry={item} onOpenSession={onOpenSession} />}
       />
 
       {usage.cost > 0 ? (
@@ -76,6 +80,14 @@ export function ChatScreen({
         autoAccept={autoAccept}
         onToggleAutoAccept={onToggleAutoAccept}
       />
+
+      {parentSessionID && onOpenSession ? (
+        <View style={styles.floatingWrap} pointerEvents="box-none">
+          <Pressable style={styles.floating} onPress={() => onOpenSession(parentSessionID)}>
+            <Text style={styles.floatingText}>← Back to main agent</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </Screen>
   )
 }
@@ -129,5 +141,27 @@ const styles = StyleSheet.create({
     textAlign: "right",
     paddingHorizontal: 14,
     paddingTop: 8,
+  },
+  floatingWrap: {
+    position: "absolute",
+    top: 52,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  floating: {
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accentMuted,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    elevation: 4,
+  },
+  floatingText: {
+    color: "#a5b4fc",
+    fontSize: 12,
+    fontWeight: "600",
   },
 })
