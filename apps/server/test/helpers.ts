@@ -99,7 +99,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     dataDir: "/tmp/masterhand-test",
     webDist: null,
     allowedOrigins: [],
-    workspacesRoot: null,
+    workspacesRoot: "/tmp/masterhand-workspaces",
     ...overrides,
   }
 }
@@ -113,7 +113,11 @@ export interface TestApp {
 }
 
 export async function startTestApp(
-  options: { config?: Partial<Config>; pathExists?: (path: string) => boolean } = {},
+  options: {
+    config?: Partial<Config>
+    createDir?: (path: string) => void
+    removeDir?: (path: string) => void
+  } = {},
 ): Promise<TestApp> {
   const config = testConfig(options.config)
   const store = createMemoryStore()
@@ -123,7 +127,13 @@ export async function startTestApp(
     reconnectBaseMs: 50,
     reconnectMaxMs: 200,
   })
-  const app = createApp({ config, store, hub, pathExists: options.pathExists ?? (() => true) })
+  const app = createApp({
+    config,
+    store,
+    hub,
+    createDir: options.createDir ?? (() => {}),
+    removeDir: options.removeDir ?? (() => {}),
+  })
   const server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" })
   await new Promise<void>((resolve) => server.once("listening", resolve))
   const address = server.address() as AddressInfo

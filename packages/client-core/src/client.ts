@@ -68,7 +68,7 @@ export interface Client {
   workspaces: {
     list(): Promise<WorkspaceRecord[]>
     create(input: CreateWorkspaceInput): Promise<WorkspaceRecord>
-    remove(id: string): Promise<void>
+    remove(id: string, options?: { deleteFiles?: boolean }): Promise<void>
   }
   eventStream(options: Omit<EventStreamOptions, "baseUrl" | "getToken" | "fetchImpl">): EventStream
 }
@@ -161,7 +161,11 @@ export function createClient(options: ClientOptions = {}): Client {
           method: "POST",
           body: JSON.stringify(input),
         }).then((response) => response.workspace),
-      remove: (id) => request<void>(`/api/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
+      remove: (id, options) =>
+        request<void>(
+          `/api/workspaces/${encodeURIComponent(id)}${options?.deleteFiles ? "?deleteFiles=1" : ""}`,
+          { method: "DELETE" },
+        ),
     },
     eventStream: (streamOptions) =>
       createEventStream({

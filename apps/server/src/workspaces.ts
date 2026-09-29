@@ -1,39 +1,55 @@
 import { basename, resolve, sep } from "node:path"
-import { statSync } from "node:fs"
+import { mkdirSync, rmSync } from "node:fs"
 
-export type WorkspacePathResult =
-  | { ok: true; path: string }
-  | { ok: false; error: "invalid_path" | "outside_root" }
+const MAX_SLUG_LENGTH = 64
 
-/** True when `path` is an existing directory visible to the BFF. */
-export function workspacePathExists(path: string): boolean {
-  try {
-    return statSync(path).isDirectory()
-  } catch {
-    return false
-  }
-}
+export type WorkspaceSlugResult =
+  | { ok: true; slug: string }
+  | { ok: false; error: "invalid_name" }
 
 /**
- * Normalizes a workspace path and, when a root is configured, ensures it lives
- * under that root. This is a string check only: the BFF and opencode may run in
- * different containers, so the directory is validated by opencode on first use.
+ * Turns a user-provided workspace name into a safe single path segment. Anything
+ * that could escape the workspace root (separators, traversal, hidden names) or
+ * break the filesystem is rejected.
  */
-export function normalizeWorkspacePath(input: unknown, root: string | null): WorkspacePathResult {
-  if (typeof input !== "string") return { ok: false, error: "invalid_path" }
-  const trimmed = input.trim()
-  if (!trimmed || !trimmed.startsWith("/")) return { ok: false, error: "invalid_path" }
+export function normalizeWorkspaceSlug(input: unknown): WorkspaceSlugResult {
+  if (typeof input !== "string") return { ok: false, error: "invalid_name" }
+  const slug = input.trim()
+  if (!slug || slug.length > MAX_SLUG_LENGTH) return { ok: false, error: "invalid_name" }
+  if (slug === "." || slug === "..") return { ok: false, error: "invalid_name" }
+  if (slug.startsWith(".")) return { ok: false, error: "invalid_name" }
+  if (slug.includes("/") || slug.includes("\\")) return { ok: false, error: "invalid_name" }
+  if (/[\u0000-\u001f]/.test(slug)) return { ok: false, error: "invalid_name" }
+  return { ok: true, slug }
+}
 
-  const normalized = resolve(trimmed)
-  if (root) {
-    const normalizedRoot = resolve(root)
-    if (normalized !== normalizedRoot && !normalized.startsWith(normalizedRoot + sep)) {
-      return { ok: false, error: "outside_root" }
-    }
+/** Absolute path of a workspace, guaranteed to live directly under `root`. */
+export function workspacePath(root: string, slug: string): string {
+  const normalizedRoot = resolve(root)
+  const path = resolve(normalizedRoot, slug)
+  if (!path.startsWith(normalizedRoot + sep)) {
+    throw new Error("workspace_slug_escapes_root")
   }
-  return { ok: true, path: normalized }
+  return path
+}
+
+/** True when `path` is strictly inside `root` (used to guard folder deletion). */
+export function isInsideRoot(root: string, path: string): boolean {
+  const normalizedRoot = resolve(root)
+  const target = resolve(path)
+  return target !== normalizedRoot && target.startsWith(normalizedRoot + sep)
 }
 
 export function workspaceName(path: string): string {
   return basename(path) || path
+}
+
+/** Creates the workspace folder (and the root itself) if missing. */
+export function createWorkspaceDir(path: string): void {
+  mkdirSync(path, { recursive: true })
+}
+
+/** Deletes a workspace folder and everything inside it. */
+export function removeWorkspaceDir(path: string): void {
+  rmSync(path, { recursive: true, force: true })
 }

@@ -72,18 +72,23 @@ describe("/api/status", () => {
 })
 
 describe("/api/workspaces", () => {
-  it("creates, lists and removes workspaces (default name from the path)", async () => {
-    app = await startTestApp()
+  it("creates the folder under the root, lists and removes it", async () => {
+    const createdPaths: string[] = []
+    app = await startTestApp({ createDir: (path) => createdPaths.push(path) })
     const cookie = await login(app.url)
 
     const created = await fetch(`${app.url}/api/workspaces`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ path: "/workspace/my-app/" }),
+      body: JSON.stringify({ name: "my-app" }),
     })
     expect(created.status).toBe(201)
     const body = (await created.json()) as { workspace: { id: string; name: string; path: string } }
-    expect(body.workspace).toMatchObject({ name: "my-app", path: "/workspace/my-app" })
+    expect(body.workspace).toMatchObject({
+      name: "my-app",
+      path: "/tmp/masterhand-workspaces/my-app",
+    })
+    expect(createdPaths).toEqual(["/tmp/masterhand-workspaces/my-app"])
 
     const listed = await fetch(`${app.url}/api/workspaces`, { headers: { cookie } })
     expect(listed.status).toBe(200)
@@ -100,30 +105,30 @@ describe("/api/workspaces", () => {
     expect((await empty.json()) as { workspaces: unknown[] }).toMatchObject({ workspaces: [] })
   })
 
-  it("honors a custom name", async () => {
+  it("trims the given name", async () => {
     app = await startTestApp()
     const cookie = await login(app.url)
     const response = await fetch(`${app.url}/api/workspaces`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ path: "/workspace/app", name: "  Cool app  " }),
+      body: JSON.stringify({ name: "  Cool app  " }),
     })
-    const body = (await response.json()) as { workspace: { name: string } }
-    expect(body.workspace.name).toBe("Cool app")
+    const body = (await response.json()) as { workspace: { name: string; path: string } }
+    expect(body.workspace).toMatchObject({ name: "Cool app", path: "/tmp/masterhand-workspaces/Cool app" })
   })
 
-  it("rejects invalid and duplicate paths", async () => {
+  it("rejects invalid and duplicate names", async () => {
     app = await startTestApp()
     const cookie = await login(app.url)
 
     const invalid = await fetch(`${app.url}/api/workspaces`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ path: "relative" }),
+      body: JSON.stringify({ name: "../etc" }),
     })
     expect(invalid.status).toBe(400)
 
-    const payload = JSON.stringify({ path: "/workspace/app" })
+    const payload = JSON.stringify({ name: "app" })
     const first = await fetch(`${app.url}/api/workspaces`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
@@ -138,24 +143,51 @@ describe("/api/workspaces", () => {
     expect(duplicate.status).toBe(409)
   })
 
-  it("enforces the configured root", async () => {
-    app = await startTestApp({ config: { workspacesRoot: "/workspace" } })
+  it("deletes the folder when deleteFiles is set", async () => {
+    const removedPaths: string[] = []
+    app = await startTestApp({ removeDir: (path) => removedPaths.push(path) })
     const cookie = await login(app.url)
-    const outside = await fetch(`${app.url}/api/workspaces`, {
+    const created = await fetch(`${app.url}/api/workspaces`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ path: "/etc" }),
+      body: JSON.stringify({ name: "app" }),
     })
-    expect(outside.status).toBe(403)
+    const { workspace } = (await created.json()) as { workspace: { id: string; path: string } }
+
+    const response = await fetch(`${app.url}/api/workspaces/${workspace.id}?deleteFiles=1`, {
+      method: "DELETE",
+      headers: { cookie },
+    })
+    expect(response.status).toBe(200)
+    expect(removedPaths).toEqual([workspace.path])
   })
 
-  it("rejects a path that does not exist", async () => {
-    app = await startTestApp({ pathExists: () => false })
+  it("refuses to delete files outside the root but still forgets the workspace", async () => {
+    const removedPaths: string[] = []
+    app = await startTestApp({ removeDir: (path) => removedPaths.push(path) })
     const cookie = await login(app.url)
-    const response = await fetch(`${app.url}/api/workspaces`, {
-      method: "POST",
-      headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ path: "/workspace/missing" }),
+    app.store.createWorkspace({ id: "legacy", name: "legacy", path: "/etc", createdAt: Date.now() })
+
+    const refused = await fetch(`${app.url}/api/workspaces/legacy?deleteFiles=1`, {
+      method: "DELETE",
+      headers: { cookie },
+    })
+    expect(refused.status).toBe(403)
+    expect(removedPaths).toEqual([])
+
+    const forgotten = await fetch(`${app.url}/api/workspaces/legacy`, {
+      method: "DELETE",
+      headers: { cookie },
+    })
+    expect(forgotten.status).toBe(200)
+  })
+
+  it("returns 404 when removing an unknown workspace", async () => {
+    app = await startTestApp()
+    const cookie = await login(app.url)
+    const response = await fetch(`${app.url}/api/workspaces/missing`, {
+      method: "DELETE",
+      headers: { cookie },
     })
     expect(response.status).toBe(404)
   })

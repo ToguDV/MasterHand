@@ -25,10 +25,10 @@ Fill in `deploy/.env`:
 | `COOKIE_SECURE` | Set `true` behind HTTPS, `false` only for local HTTP |
 | `ALLOWED_ORIGINS` | Extra origins allowed on mutating requests (comma-separated) |
 | `MASTERHAND_BIND` / `MASTERHAND_PORT` | Host bind address and port for the BFF (default `0.0.0.0:8787`; use `127.0.0.1` when the proxy runs on the host) |
-| `PROJECTS_ROOT` | Host directory mounted into opencode as `/workspace` (default `../projects`). Register its subfolders as workspaces from the UI |
+| `WORKSPACES_DIR` | Host directory mounted into opencode as `/workspace` (default `../workspace`). Each workspace you add becomes a subfolder inside it |
 | `OPENCODE_VERSION` | Pinned opencode version |
 
-> **Workspaces:** from the UI you register project folders as workspaces. They must exist and live under the projects root mounted into opencode (`/workspace` in the container, i.e. `PROJECTS_ROOT` on the host), enforced by the BFF's `WORKSPACES_ROOT`. The BFF also mounts the projects root read-only (`${PROJECTS_ROOT}:/workspace:ro`) so it can verify that a path is a real directory before registering it. Removing a workspace only forgets it in MasterHand; files and sessions are untouched.
+> **Workspaces:** a workspace is a single project folder. From the UI you give it a name and the BFF creates the subfolder under the workspaces root (`/workspace` in the container, i.e. `WORKSPACES_DIR` on the host), isolated from the rest. The BFF and opencode share that mount, so the BFF can create and (optionally) delete the folder while opencode works inside it. Removing a workspace only forgets it in MasterHand unless you tick "also delete files from disk", which deletes the folder and its contents.
 
 ## 3. Start the stack
 

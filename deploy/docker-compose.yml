@@ -13,12 +13,12 @@ services:
       OPENCODE_URL: http://opencode:4096
       DATA_DIR: /data
       WEB_DIST: apps/web/dist
-      # Registered workspaces must live under the projects root mounted into opencode.
+      # Every workspace is a subfolder created here (same path opencode sees).
       WORKSPACES_ROOT: /workspace
     volumes:
       - masterhand_data:/data
-      # Read-only view of the projects root so the BFF can validate workspace paths.
-      - ${PROJECTS_ROOT:-../projects}:/workspace:ro
+      # Shared with opencode: the BFF creates each workspace subfolder here.
+      - ${WORKSPACES_DIR:-../workspace}:/workspace
     ports:
       # Bind to 127.0.0.1 when your reverse proxy runs on the host.
       - "${MASTERHAND_BIND:-0.0.0.0}:${MASTERHAND_PORT:-8787}:8787"
@@ -42,7 +42,7 @@ services:
     volumes:
       - opencode_config:/home/node/.config/opencode
       - opencode_data:/home/node/.local/share/opencode
-      - ${PROJECTS_ROOT:-../projects}:/workspace
+      - ${WORKSPACES_DIR:-../workspace}:/workspace
     working_dir: /workspace
     expose:
       - "4096"

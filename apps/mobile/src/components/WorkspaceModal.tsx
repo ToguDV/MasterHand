@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react"
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { ApiError, type CreateWorkspaceInput, type WorkspaceRecord } from "@masterhand/client-core"
 import { colors } from "../theme"
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 409) return "That workspace is already registered"
-    if (error.status === 404) return "That folder does not exist or is not accessible to opencode"
-    if (error.status === 403) return "The path is outside the allowed projects root"
-    if (error.status === 400) return "Enter an absolute path (starting with /)"
+    if (error.status === 409) return "That workspace already exists"
+    if (error.status === 400) return "Enter a valid folder name (no slashes or leading dots)"
   }
   return "Could not add the workspace"
 }
@@ -27,31 +25,31 @@ export function WorkspaceModal({
   selectedID: string | null
   onSelect: (id: string) => void
   onAdd: (input: CreateWorkspaceInput) => Promise<void>
-  onRemove: (id: string) => void
+  onRemove: (id: string, options: { deleteFiles: boolean }) => void
   onClose: () => void
 }) {
   const [adding, setAdding] = useState(false)
-  const [path, setPath] = useState("")
   const [name, setName] = useState("")
+  const [deleteFiles, setDeleteFiles] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (visible) return
     setAdding(false)
-    setPath("")
     setName("")
+    setDeleteFiles(false)
     setBusy(false)
     setError(null)
   }, [visible])
 
   async function submit(): Promise<void> {
-    const trimmed = path.trim()
+    const trimmed = name.trim()
     if (!trimmed || busy) return
     setBusy(true)
     setError(null)
     try {
-      await onAdd({ path: trimmed, ...(name.trim() ? { name: name.trim() } : {}) })
+      await onAdd({ name: trimmed })
     } catch (err) {
       setError(errorMessage(err))
       setBusy(false)
@@ -89,21 +87,16 @@ export function WorkspaceModal({
 
           {adding ? (
             <View style={styles.form}>
-              <TextInput
-                value={path}
-                onChangeText={setPath}
-                placeholder="/workspace/my-project"
-                placeholderTextColor={colors.muted}
-                autoCorrect={false}
-                autoCapitalize="none"
-                style={styles.input}
-              />
+              <Text style={styles.formHint}>
+                A new folder with this name is created inside the workspaces root.
+              </Text>
               <TextInput
                 value={name}
                 onChangeText={setName}
-                placeholder="Name (optional)"
+                placeholder="my-project"
                 placeholderTextColor={colors.muted}
                 autoCorrect={false}
+                autoCapitalize="none"
                 style={styles.input}
               />
               {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -112,8 +105,8 @@ export function WorkspaceModal({
                   <Text style={styles.secondaryText}>Cancel</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.primary, (!path.trim() || busy) && styles.disabled]}
-                  disabled={!path.trim() || busy}
+                  style={[styles.primary, (!name.trim() || busy) && styles.disabled]}
+                  disabled={!name.trim() || busy}
                   onPress={() => void submit()}
                 >
                   <Text style={styles.primaryText}>{busy ? "Adding…" : "Add"}</Text>
@@ -121,15 +114,26 @@ export function WorkspaceModal({
               </View>
             </View>
           ) : (
-            <View style={styles.formActions}>
-              {selectedID ? (
-                <Pressable style={styles.danger} onPress={() => onRemove(selectedID)}>
-                  <Text style={styles.dangerText}>Remove workspace</Text>
+            <View style={styles.form}>
+              {selected ? (
+                <Pressable style={styles.checkRow} onPress={() => setDeleteFiles((value) => !value)}>
+                  <Switch value={deleteFiles} onValueChange={setDeleteFiles} />
+                  <Text style={styles.checkLabel}>Also delete files from disk</Text>
                 </Pressable>
               ) : null}
-              <Pressable style={styles.primary} onPress={() => setAdding(true)}>
-                <Text style={styles.primaryText}>Add workspace</Text>
-              </Pressable>
+              <View style={styles.formActions}>
+                {selectedID ? (
+                  <Pressable
+                    style={styles.danger}
+                    onPress={() => onRemove(selectedID, { deleteFiles })}
+                  >
+                    <Text style={styles.dangerText}>Remove workspace</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable style={styles.primary} onPress={() => setAdding(true)}>
+                  <Text style={styles.primaryText}>Add workspace</Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
@@ -202,6 +206,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
   },
+  formHint: {
+    color: colors.muted,
+    fontSize: 12,
+  },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
@@ -212,12 +220,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  checkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  checkLabel: {
+    color: colors.text,
+    fontSize: 14,
+  },
   formActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 4,
   },
   primary: {
     backgroundColor: colors.accent,

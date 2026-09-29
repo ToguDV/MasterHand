@@ -44,7 +44,7 @@ export function SessionsScreen({
   onSignOut: () => void
   onSelectWorkspace: (id: string) => void
   onAddWorkspace: (input: CreateWorkspaceInput) => Promise<void>
-  onRemoveWorkspace: (id: string) => void
+  onRemoveWorkspace: (id: string, options: { deleteFiles: boolean }) => void
   onDeleteSession: (id: string) => void
 }) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
@@ -57,11 +57,17 @@ export function SessionsScreen({
     ])
   }
 
-  function confirmRemoveWorkspace(id: string): void {
-    Alert.alert("Remove workspace", "Files and sessions are not deleted.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: () => onRemoveWorkspace(id) },
-    ])
+  function confirmRemoveWorkspace(id: string, options: { deleteFiles: boolean }): void {
+    Alert.alert(
+      "Remove workspace",
+      options.deleteFiles
+        ? "The folder and all its files will be deleted. Sessions are kept."
+        : "Files and sessions are not deleted.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => onRemoveWorkspace(id, options) },
+      ],
+    )
   }
 
   return (
@@ -115,9 +121,9 @@ export function SessionsScreen({
         selectedID={workspaceID}
         onSelect={onSelectWorkspace}
         onAdd={onAddWorkspace}
-        onRemove={(id) => {
+        onRemove={(id, options) => {
           setWorkspaceOpen(false)
-          confirmRemoveWorkspace(id)
+          confirmRemoveWorkspace(id, options)
         }}
         onClose={() => setWorkspaceOpen(false)}
       />

@@ -16,20 +16,26 @@ import type { Config } from "./config.js"
 import type { EventHub } from "./events.js"
 import { createOpencodeProxy } from "./proxy.js"
 import type { Store } from "./store.js"
-import { normalizeWorkspacePath, workspaceName, workspacePathExists } from "./workspaces.js"
+import {
+  createWorkspaceDir,
+  isInsideRoot,
+  normalizeWorkspaceSlug,
+  removeWorkspaceDir,
+  workspacePath,
+} from "./workspaces.js"
 
 export interface AppDeps {
   config: Config
   store: Store
   hub: EventHub
   fetchImpl?: typeof fetch
-  /** Overridable for tests: whether a workspace directory exists. */
-  pathExists?: (path: string) => boolean
+  /** Overridable for tests: create/delete workspace folders. */
+  createDir?: (path: string) => void
+  removeDir?: (path: string) => void
 }
 
 const KEEPALIVE_MS = 25_000
 const MAX_DEVICE_NAME_LENGTH = 64
-const MAX_WORKSPACE_NAME_LENGTH = 64
 
 function clientIp(header: string | undefined): string {
   return header?.split(",")[0]?.trim() || "unknown"
@@ -38,7 +44,8 @@ function clientIp(header: string | undefined): string {
 export function createApp(deps: AppDeps): Hono {
   const { config } = deps
   const fetchImpl = deps.fetchImpl ?? fetch
-  const pathExists = deps.pathExists ?? workspacePathExists
+  const createDir = deps.createDir ?? createWorkspaceDir
+  const removeDir = deps.removeDir ?? removeWorkspaceDir
   const app = new Hono()
   const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5 })
 
@@ -169,37 +176,39 @@ export function createApp(deps: AppDeps): Hono {
   api.get("/workspaces", (c) => c.json({ workspaces: deps.store.listWorkspaces() }))
 
   api.post("/workspaces", async (c) => {
-    let body: { path?: unknown; name?: unknown }
+    let body: { name?: unknown }
     try {
       body = await c.req.json()
     } catch {
       return c.json({ error: "bad_request" }, 400)
     }
 
-    const result = normalizeWorkspacePath(body.path, config.workspacesRoot)
-    if (!result.ok) {
-      return result.error === "outside_root"
-        ? c.json({ error: "outside_root" }, 403)
-        : c.json({ error: "invalid_path" }, 400)
-    }
-    if (!pathExists(result.path)) {
-      return c.json({ error: "not_found" }, 404)
-    }
-    if (deps.store.getWorkspaceByPath(result.path)) {
+    const result = normalizeWorkspaceSlug(body.name)
+    if (!result.ok) return c.json({ error: "invalid_name" }, 400)
+
+    const path = workspacePath(config.workspacesRoot, result.slug)
+    if (deps.store.getWorkspaceByPath(path)) {
       return c.json({ error: "already_exists" }, 409)
     }
 
-    const name =
-      typeof body.name === "string" && body.name.trim()
-        ? body.name.trim().slice(0, MAX_WORKSPACE_NAME_LENGTH)
-        : workspaceName(result.path)
-    const workspace = { id: randomUUID(), name, path: result.path, createdAt: Date.now() }
+    createDir(path)
+    const workspace = { id: randomUUID(), name: result.slug, path, createdAt: Date.now() }
     deps.store.createWorkspace(workspace)
     return c.json({ workspace }, 201)
   })
 
   api.delete("/workspaces/:id", (c) => {
-    deps.store.removeWorkspace(c.req.param("id"))
+    const workspace = deps.store.getWorkspace(c.req.param("id"))
+    if (!workspace) return c.json({ error: "not_found" }, 404)
+
+    if (c.req.query("deleteFiles") === "1") {
+      if (!isInsideRoot(config.workspacesRoot, workspace.path)) {
+        return c.json({ error: "outside_root" }, 403)
+      }
+      removeDir(workspace.path)
+    }
+
+    deps.store.removeWorkspace(workspace.id)
     return c.json({ ok: true })
   })
 

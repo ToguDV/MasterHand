@@ -1,3 +1,4 @@
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { loadConfig } from "../src/config.js"
 
@@ -69,10 +70,10 @@ describe("loadConfig", () => {
     expect(config.allowedOrigins.sort()).toEqual(["https://a.example", "https://b.example"])
   })
 
-  it("parses the optional workspaces root", () => {
-    expect(loadConfig(env()).workspacesRoot).toBeNull()
-    expect(loadConfig(env({ WORKSPACES_ROOT: " /workspace " })).workspacesRoot).toBe("/workspace")
-    expect(loadConfig(env({ WORKSPACES_ROOT: "" })).workspacesRoot).toBeNull()
+  it("resolves the workspaces root with a repo-local default", () => {
+    expect(loadConfig(env()).workspacesRoot).toBe(resolve("./workspace"))
+    expect(loadConfig(env({ WORKSPACES_ROOT: " /srv/workspaces " })).workspacesRoot).toBe("/srv/workspaces")
+    expect(loadConfig(env({ WORKSPACES_ROOT: "" })).workspacesRoot).toBe(resolve("./workspace"))
   })
 
   it("adds the local dev origins outside production", () => {

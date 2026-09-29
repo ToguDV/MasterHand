@@ -51,8 +51,7 @@ export interface WorkspaceRecord {
 }
 
 export interface CreateWorkspaceInput {
-  path: string
-  name?: string
+  name: string
 }
 
 export interface BffStatus {
