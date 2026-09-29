@@ -38,3 +38,40 @@ describe("memory device store", () => {
     store.close()
   })
 })
+
+describe("sqlite workspace store", () => {
+  it("persists, looks up and removes workspaces", () => {
+    const dir = mkdtempSync(join(tmpdir(), "masterhand-store-"))
+    const store = createSqliteStore(join(dir, "test.sqlite"))
+    try {
+      store.createWorkspace({ id: "ws_1", name: "App", path: "/workspace/app", createdAt: 1 })
+      store.createWorkspace({ id: "ws_2", name: "Lib", path: "/workspace/lib", createdAt: 2 })
+
+      expect(store.listWorkspaces().map((workspace) => workspace.id)).toEqual(["ws_1", "ws_2"])
+      expect(store.getWorkspace("ws_1")).toMatchObject({ name: "App" })
+      expect(store.getWorkspaceByPath("/workspace/app")?.id).toBe("ws_1")
+      expect(store.getWorkspaceByPath("/workspace/missing")).toBeNull()
+
+      store.removeWorkspace("ws_1")
+      expect(store.getWorkspace("ws_1")).toBeNull()
+      expect(store.listWorkspaces()).toHaveLength(1)
+    } finally {
+      store.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("memory workspace store", () => {
+  it("behaves like the sqlite store", () => {
+    const store = createMemoryStore()
+    store.createWorkspace({ id: "ws_1", name: "App", path: "/workspace/app", createdAt: 1 })
+    store.createWorkspace({ id: "ws_2", name: "Lib", path: "/workspace/lib", createdAt: 2 })
+
+    expect(store.listWorkspaces().map((workspace) => workspace.id)).toEqual(["ws_1", "ws_2"])
+    expect(store.getWorkspaceByPath("/workspace/lib")?.id).toBe("ws_2")
+    store.removeWorkspace("ws_2")
+    expect(store.listWorkspaces()).toHaveLength(1)
+    store.close()
+  })
+})

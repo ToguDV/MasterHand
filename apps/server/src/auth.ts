@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto"
 import type { Context, MiddlewareHandler } from "hono"
 import { deleteCookie, getCookie, setCookie } from "hono/cookie"
 import type { Config } from "./config.js"
-import type { DeviceStore } from "./store.js"
+import type { Store } from "./store.js"
 
 export const SESSION_COOKIE = "mh_session"
 
@@ -127,7 +127,7 @@ function bearerToken(header: string | undefined): string | null {
   return value.trim() || null
 }
 
-export function requireAuth(config: Config, store: DeviceStore): MiddlewareHandler {
+export function requireAuth(config: Config, store: Store): MiddlewareHandler {
   return async (c, next) => {
     const token = bearerToken(c.req.header("authorization"))
     if (token) {

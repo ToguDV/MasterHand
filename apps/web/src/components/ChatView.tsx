@@ -4,8 +4,18 @@ import { client } from "../client"
 import { AssistantBlock, UserBubble } from "./MessageContent"
 import { Composer } from "./Composer"
 
-export function ChatView({ sessionID, busy, connected }: { sessionID: string; busy: boolean; connected: boolean }) {
-  const messagesQuery = useMessages(client, sessionID, { busy, connected })
+export function ChatView({
+  sessionID,
+  busy,
+  connected,
+  directory,
+}: {
+  sessionID: string
+  busy: boolean
+  connected: boolean
+  directory?: string | null
+}) {
+  const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
 
   const messages = messagesQuery.data ?? []
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -46,7 +56,7 @@ export function ChatView({ sessionID, busy, connected }: { sessionID: string; bu
           )}
         </div>
       </div>
-      <Composer sessionID={sessionID} busy={busy} />
+      <Composer sessionID={sessionID} busy={busy} directory={directory} />
     </div>
   )
 }

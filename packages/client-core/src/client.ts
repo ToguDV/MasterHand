@@ -2,6 +2,7 @@ import type {
   AgentInfo,
   BffStatus,
   Config,
+  CreateWorkspaceInput,
   DeviceLoginResponse,
   DeviceRecord,
   MessageWithPartsResponse,
@@ -11,6 +12,7 @@ import type {
   ProvidersResponse,
   Session,
   SessionStatuses,
+  WorkspaceRecord,
 } from "./types"
 import { createEventStream, type EventStream, type EventStreamOptions } from "./events"
 
@@ -45,18 +47,28 @@ export interface Client {
     revokeDevice(id: string): Promise<void>
   }
   api: {
-    listSessions(): Promise<Session[]>
-    createSession(): Promise<Session>
-    deleteSession(id: string): Promise<boolean>
-    abortSession(id: string): Promise<boolean>
-    messages(id: string): Promise<MessageWithPartsResponse[]>
-    promptAsync(id: string, body: PromptBody): Promise<void>
-    respondPermission(sessionID: string, permissionID: string, response: PermissionResponse): Promise<boolean>
+    listSessions(directory?: string | null): Promise<Session[]>
+    createSession(directory?: string | null): Promise<Session>
+    deleteSession(id: string, directory?: string | null): Promise<boolean>
+    abortSession(id: string, directory?: string | null): Promise<boolean>
+    messages(id: string, directory?: string | null): Promise<MessageWithPartsResponse[]>
+    promptAsync(id: string, body: PromptBody, directory?: string | null): Promise<void>
+    respondPermission(
+      sessionID: string,
+      permissionID: string,
+      response: PermissionResponse,
+      directory?: string | null,
+    ): Promise<boolean>
     agents(): Promise<AgentInfo[]>
     providers(): Promise<ProvidersResponse>
     config(): Promise<Config>
     statuses(): Promise<SessionStatuses>
     projects(): Promise<Project[]>
+  }
+  workspaces: {
+    list(): Promise<WorkspaceRecord[]>
+    create(input: CreateWorkspaceInput): Promise<WorkspaceRecord>
+    remove(id: string): Promise<void>
   }
   eventStream(options: Omit<EventStreamOptions, "baseUrl" | "getToken" | "fetchImpl">): EventStream
 }
@@ -83,7 +95,26 @@ export function createClient(options: ClientOptions = {}): Client {
     return (await response.json()) as T
   }
 
-  const opencode = <T>(path: string, init?: RequestInit) => request<T>(`/api/oc${path}`, init)
+  /**
+   * Mirrors the opencode SDK: the `directory` override travels as a query
+   * parameter on GET/HEAD and as the `x-opencode-directory` header on mutations.
+   */
+  function withDirectory(path: string, init: RequestInit | undefined, directory?: string | null) {
+    if (!directory) return { path, init }
+    const method = (init?.method ?? "GET").toUpperCase()
+    if (method === "GET" || method === "HEAD") {
+      const separator = path.includes("?") ? "&" : "?"
+      return { path: `${path}${separator}directory=${encodeURIComponent(directory)}`, init }
+    }
+    const headers = new Headers(init?.headers)
+    headers.set("x-opencode-directory", encodeURIComponent(directory))
+    return { path, init: { ...init, headers } }
+  }
+
+  const opencode = <T>(path: string, init?: RequestInit, directory?: string | null) => {
+    const request_ = withDirectory(`/api/oc${path}`, init, directory)
+    return request<T>(request_.path, request_.init)
+  }
 
   return {
     baseUrl,
@@ -102,23 +133,35 @@ export function createClient(options: ClientOptions = {}): Client {
       revokeDevice: (id) => request<void>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
     },
     api: {
-      listSessions: () => opencode<Session[]>("/session"),
-      createSession: () => opencode<Session>("/session", { method: "POST", body: "{}" }),
-      deleteSession: (id) => opencode<boolean>(`/session/${id}`, { method: "DELETE" }),
-      abortSession: (id) => opencode<boolean>(`/session/${id}/abort`, { method: "POST" }),
-      messages: (id) => opencode<MessageWithPartsResponse[]>(`/session/${id}/message`),
-      promptAsync: (id, body) =>
-        opencode<void>(`/session/${id}/prompt_async`, { method: "POST", body: JSON.stringify(body) }),
-      respondPermission: (sessionID, permissionID, response) =>
-        opencode<boolean>(`/session/${sessionID}/permissions/${permissionID}`, {
-          method: "POST",
-          body: JSON.stringify({ response }),
-        }),
+      listSessions: (directory) => opencode<Session[]>("/session", undefined, directory),
+      createSession: (directory) => opencode<Session>("/session", { method: "POST", body: "{}" }, directory),
+      deleteSession: (id, directory) =>
+        opencode<boolean>(`/session/${id}`, { method: "DELETE" }, directory),
+      abortSession: (id, directory) =>
+        opencode<boolean>(`/session/${id}/abort`, { method: "POST" }, directory),
+      messages: (id, directory) => opencode<MessageWithPartsResponse[]>(`/session/${id}/message`, undefined, directory),
+      promptAsync: (id, body, directory) =>
+        opencode<void>(`/session/${id}/prompt_async`, { method: "POST", body: JSON.stringify(body) }, directory),
+      respondPermission: (sessionID, permissionID, response, directory) =>
+        opencode<boolean>(
+          `/session/${sessionID}/permissions/${permissionID}`,
+          { method: "POST", body: JSON.stringify({ response }) },
+          directory,
+        ),
       agents: () => opencode<AgentInfo[]>("/agent"),
       providers: () => opencode<ProvidersResponse>("/config/providers"),
       config: () => opencode<Config>("/config"),
       statuses: () => opencode<SessionStatuses>("/session/status"),
       projects: () => opencode<Project[]>("/project"),
+    },
+    workspaces: {
+      list: () => request<{ workspaces: WorkspaceRecord[] }>("/api/workspaces").then((response) => response.workspaces),
+      create: (input) =>
+        request<{ workspace: WorkspaceRecord }>("/api/workspaces", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }).then((response) => response.workspace),
+      remove: (id) => request<void>(`/api/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
     },
     eventStream: (streamOptions) =>
       createEventStream({

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { addWorkspace, login } from "./helpers"
 
 test("rejects a wrong password", async ({ page }) => {
   await page.goto("/")
@@ -8,11 +9,10 @@ test("rejects a wrong password", async ({ page }) => {
 })
 
 test("login, create a session, stream a reply and approve a permission", async ({ page }) => {
-  await page.goto("/")
-  await page.locator("#password").fill("e2e-password")
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await login(page)
+  await addWorkspace(page)
 
-  await expect(page.getByRole("button", { name: "+ New" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "+ New" })).toBeEnabled()
   await page.getByRole("button", { name: "+ New" }).click()
 
   const composer = page.getByPlaceholder("Write a message…")

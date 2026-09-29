@@ -44,6 +44,22 @@ describe("opencode proxy", () => {
     expect(JSON.parse(proxied?.body ?? "{}")).toEqual({ parts: [{ type: "text", text: "hello" }] })
   })
 
+  it("forwards the x-opencode-directory header on mutations", async () => {
+    upstream = await startMockOpencode()
+    app = await startTestApp({ config: { opencodeUrl: upstream.url, opencodeAuth: TEST_AUTH } })
+    const cookie = await login(app.url)
+
+    await fetch(`${app.url}/api/oc/session`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json", "x-opencode-directory": "/workspace/app" },
+      body: "{}",
+    })
+
+    const proxied = upstream.requests.find((request) => request.path === "/session")
+    expect(proxied?.directory).toBe("/workspace/app")
+    expect(proxied?.authorization).toBe(TEST_AUTH)
+  })
+
   it("requires authentication to proxy", async () => {
     upstream = await startMockOpencode()
     app = await startTestApp({ config: { opencodeUrl: upstream.url, opencodeAuth: TEST_AUTH } })

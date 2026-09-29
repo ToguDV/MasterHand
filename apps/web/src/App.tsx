@@ -8,13 +8,29 @@ import {
   useEventStream,
   useSessions,
   useSessionStatuses,
+  useWorkspaces,
+  type CreateWorkspaceInput,
   type Permission,
 } from "@masterhand/client-core"
 import { client } from "./client"
+import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog"
 import { ChatView } from "./components/ChatView"
 import { Login } from "./components/Login"
 import { PermissionDialog } from "./components/PermissionDialog"
 import { SessionList } from "./components/SessionList"
+import { WorkspacePicker } from "./components/WorkspacePicker"
+
+const WORKSPACE_STORAGE_KEY = "masterhand.workspace"
+
+function initialWorkspaceID(): string | null {
+  const fromUrl = new URLSearchParams(window.location.search).get("workspace")
+  if (fromUrl) return fromUrl
+  try {
+    return window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
 
 export default function App() {
   const queryClient = useQueryClient()
@@ -22,6 +38,8 @@ export default function App() {
   const [sessionID, setSessionID] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get("session"),
   )
+  const [workspaceID, setWorkspaceID] = useState<string | null>(initialWorkspaceID)
+  const [addingWorkspace, setAddingWorkspace] = useState(false)
   const [connected, setConnected] = useState(false)
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [responding, setResponding] = useState(false)
@@ -86,7 +104,33 @@ export default function App() {
     window.history.replaceState(null, "", url)
   }, [])
 
-  const sessionsQuery = useSessions(client, authed === true)
+  const selectWorkspace = useCallback((id: string | null) => {
+    setWorkspaceID(id)
+    const url = new URL(window.location.href)
+    if (id) url.searchParams.set("workspace", id)
+    else url.searchParams.delete("workspace")
+    window.history.replaceState(null, "", url)
+    try {
+      if (id) window.localStorage.setItem(WORKSPACE_STORAGE_KEY, id)
+      else window.localStorage.removeItem(WORKSPACE_STORAGE_KEY)
+    } catch {
+      // storage may be unavailable (private mode)
+    }
+  }, [])
+
+  const workspacesQuery = useWorkspaces(client, authed === true)
+  const workspaces = workspacesQuery.data ?? []
+
+  useEffect(() => {
+    if (!workspacesQuery.data) return
+    if (workspaceID && workspacesQuery.data.some((workspace) => workspace.id === workspaceID)) return
+    selectWorkspace(workspacesQuery.data[0]?.id ?? null)
+  }, [workspacesQuery.data, workspaceID, selectWorkspace])
+
+  const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
+  const directory = workspace?.path ?? null
+
+  const sessionsQuery = useSessions(client, authed === true, 10_000, directory)
   const statusesQuery = useSessionStatuses(client, authed === true, connected)
 
   useEffect(() => {
@@ -110,10 +154,14 @@ export default function App() {
   }, [queryClient, openSession])
 
   async function createSession() {
+    if (!directory) {
+      setBanner("Add a workspace first")
+      return
+    }
     setCreating(true)
     setBanner(null)
     try {
-      const session = await client.api.createSession()
+      const session = await client.api.createSession(directory)
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
       openSession(session.id)
     } catch {
@@ -123,12 +171,42 @@ export default function App() {
     }
   }
 
+  async function deleteSession(id: string) {
+    if (!window.confirm("Delete this session and all its data?")) return
+    try {
+      await client.api.deleteSession(id, directory)
+      if (sessionID === id) openSession(null)
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+    } catch {
+      setBanner("Could not delete the session")
+    }
+  }
+
+  async function addWorkspace(input: CreateWorkspaceInput) {
+    const created = await client.workspaces.create(input)
+    await queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+    selectWorkspace(created.id)
+    setAddingWorkspace(false)
+  }
+
+  async function deleteWorkspace(id: string) {
+    const target = workspaces.find((item) => item.id === id)
+    if (!window.confirm(`Remove workspace "${target?.name ?? ""}"? Files and sessions are not deleted.`)) return
+    try {
+      await client.workspaces.remove(id)
+      if (workspaceID === id) selectWorkspace(null)
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+    } catch {
+      setBanner("Could not remove the workspace")
+    }
+  }
+
   async function respondPermission(response: "once" | "always" | "reject") {
     const permission = permissions[0]
     if (!permission) return
     setResponding(true)
     try {
-      await client.api.respondPermission(permission.sessionID, permission.id, response)
+      await client.api.respondPermission(permission.sessionID, permission.id, response, directory)
     } catch {
       setBanner("Could not answer the permission request")
     } finally {
@@ -190,19 +268,28 @@ export default function App() {
         <aside
           className={`${sessionID ? "hidden md:flex" : "flex"} w-full min-h-0 flex-col border-r border-zinc-800 md:w-72 md:shrink-0`}
         >
+          <WorkspacePicker
+            workspaces={workspaces}
+            selectedID={workspaceID}
+            onSelect={selectWorkspace}
+            onAdd={() => setAddingWorkspace(true)}
+            onDelete={(id) => void deleteWorkspace(id)}
+          />
           <SessionList
             sessions={sessions}
             statuses={statuses}
             selectedID={sessionID}
             onSelect={openSession}
             onNew={() => void createSession()}
+            onDelete={(id) => void deleteSession(id)}
             creating={creating}
+            canCreate={Boolean(directory)}
           />
         </aside>
 
         <main className={`${sessionID ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
           {sessionID ? (
-            <ChatView key={sessionID} sessionID={sessionID} busy={busy} connected={connected} />
+            <ChatView key={sessionID} sessionID={sessionID} busy={busy} connected={connected} directory={directory} />
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-zinc-500">
               Select a session or create a new one.
@@ -217,6 +304,10 @@ export default function App() {
           busy={responding}
           onRespond={(response) => void respondPermission(response)}
         />
+      )}
+
+      {addingWorkspace && (
+        <AddWorkspaceDialog onSubmit={addWorkspace} onClose={() => setAddingWorkspace(false)} />
       )}
     </div>
   )
