@@ -26,9 +26,13 @@ Fill in `deploy/.env`:
 | `ALLOWED_ORIGINS` | Extra origins allowed on mutating requests (comma-separated) |
 | `MASTERHAND_BIND` / `MASTERHAND_PORT` | Host bind address and port for the BFF (default `0.0.0.0:8787`; use `127.0.0.1` when the proxy runs on the host) |
 | `WORKSPACES_DIR` | Host directory mounted into opencode as `/workspace` (default `../workspace`). Each workspace you add becomes a subfolder inside it |
+| `GIT_COMMIT_NAME` / `GIT_COMMIT_EMAIL` | Author for commits MasterHand creates in isolated worktrees |
+| `GH_TOKEN` / `GITLAB_TOKEN` | Optional credentials so "Finish & PR" can push and open pull requests |
 | `OPENCODE_VERSION` | Pinned opencode version |
 
 > **Workspaces:** a workspace is a single project folder. From the UI you give it a name and the BFF creates the subfolder under the workspaces root (`/workspace` in the container, i.e. `WORKSPACES_DIR` on the host), isolated from the rest. The BFF and opencode share that mount, so the BFF can create and (optionally) delete the folder while opencode works inside it. Removing a workspace only forgets it in MasterHand unless you tick "also delete files from disk", which deletes the folder and its contents.
+
+> **Isolated sessions:** when you create a session with the "Isolated" toggle, MasterHand runs it in its own git worktree (`/workspace/.worktrees/<workspace>/<id>`) on branch `masterhand/<slug>-<id>`. The workspace is `git init`-ed automatically if needed. "Finish & PR" commits the worktree, and if the repo has a remote it pushes the branch and opens a PR/MR with `gh`/`glab` when available, otherwise it shows a compare URL.
 
 ## 3. Start the stack
 
@@ -46,6 +50,32 @@ docker compose -f deploy/docker-compose.yml run --rm opencode auth login
 ```
 
 Credentials persist in the `opencode_config` volume.
+
+### Git credentials (isolated sessions)
+
+"Finish & PR" runs inside the **BFF** container. Without credentials it still commits locally and reports the push error in the UI. To enable push + PR:
+
+- **GitHub CLI (bundled):** set `GH_TOKEN` in `deploy/.env` and let `gh` handle the PR. For `git push`, configure the credential helper once per container (or mount a persistent gitconfig):
+
+  ```bash
+  docker compose -f deploy/docker-compose.yml exec masterhand gh auth setup-git
+  ```
+
+- **Mounted credentials (durable):** mount your git config and store file read-only and add a compose override:
+
+  ```yaml
+  services:
+    masterhand:
+      volumes:
+        - ~/.gitconfig:/home/node/.gitconfig:ro
+        - ~/.git-credentials:/home/node/.git-credentials:ro
+  ```
+
+  with `[credential] helper = store` in `~/.gitconfig`.
+
+- **SSH:** mount `~/.ssh` read-only and set `GIT_SSH_COMMAND="ssh -i /home/node/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new"` for the `masterhand` service.
+
+`glab` is not bundled; extend `deploy/server.Dockerfile` or mount the binary to use GitLab merge requests (without it, MasterHand still returns a compare URL).
 
 ## 5. Put TLS in front
 

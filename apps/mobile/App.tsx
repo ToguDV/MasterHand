@@ -7,7 +7,9 @@ import {
   createClient,
   createEventHandler,
   invalidateOnReconnect,
+  sessionDirectory,
   useEventStream,
+  useSessionDirectories,
   useSessions,
   useSessionStatuses,
   useWorkspaces,
@@ -202,7 +204,8 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   const workspacesQuery = useWorkspaces(client, true)
   const workspaces = workspacesQuery.data ?? []
   const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
-  const directory = workspace?.path ?? null
+  const workspacePath = workspace?.path ?? null
+  const directoriesQuery = useSessionDirectories(client, true, workspaceID)
 
   useEffect(() => {
     if (!workspacesQuery.data) return
@@ -213,13 +216,15 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     else void clearWorkspaceID()
   }, [workspacesQuery.data, workspaceID])
 
-  const sessionsQuery = useSessions(client, true, 10_000, directory)
+  const sessionsQuery = useSessions(client, true, 10_000, workspaceID)
   const statusesQuery = useSessionStatuses(client, true, connected)
   const statuses = statusesQuery.data ?? {}
   const sessions = sessionsQuery.data ?? []
   const selected = sessions.find((session) => session.id === sessionID) ?? null
   const parentSessionID = selected?.parentID ?? null
   const busy = sessionID ? statuses[sessionID]?.type === "busy" : false
+  // Isolated sessions run in their worktree; everything else in the workspace.
+  const directory = sessionDirectory(selected, workspacePath)
 
   const handleEvent = useMemo(
     () =>
@@ -241,7 +246,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   // `permission.asked` events are lost while the app is backgrounded and never
   // replayed. Reconcile against opencode on connect and when workspaces load.
   const syncPermissions = useCallback(async () => {
-    const directories = (workspacesQuery.data ?? []).map((item) => item.path)
+    const directories = directoriesQuery.data ?? (workspacePath ? [workspacePath] : [])
     try {
       const lists = await Promise.all(
         directories.map((dir) => client.api.permissions(dir).catch(() => [] as Permission[])),
@@ -256,7 +261,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     } catch {
       // best effort: a missed stream event is not worth surfacing an error
     }
-  }, [workspacesQuery.data])
+  }, [directoriesQuery.data, workspacePath])
 
   const handleConnect = useCallback(() => {
     invalidateOnReconnect(queryClient)
@@ -297,16 +302,17 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     )
   }, [])
 
-  async function createSession() {
-    if (!directory) {
+  async function createSession(isolated: boolean) {
+    if (!workspaceID) {
       setBanner("Add a workspace first")
       return
     }
     setCreating(true)
     setBanner(null)
     try {
-      const session = await client.api.createSession(directory)
+      const session = await client.api.sessions.create(workspaceID, { isolated })
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      void queryClient.invalidateQueries({ queryKey: ["directories"] })
       setSessionID(session.id)
     } catch {
       setBanner("Could not create the session")
@@ -316,10 +322,13 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   }
 
   async function deleteSession(id: string) {
+    if (!workspaceID) return
+    const target = sessions.find((session) => session.id === id) ?? null
     try {
-      await client.api.deleteSession(id, directory)
+      await client.api.sessions.remove(workspaceID, id, sessionDirectory(target, workspacePath))
       if (sessionID === id) setSessionID(null)
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      void queryClient.invalidateQueries({ queryKey: ["directories"] })
     } catch {
       setBanner("Could not delete the session")
     }
@@ -375,6 +384,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           busy={busy}
           connected={connected}
           directory={directory}
+          isolation={selected?.isolation}
           autoAccept={autoAcceptSessions.includes(sessionID)}
           onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
           onOpenSession={setSessionID}
@@ -391,9 +401,9 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
           banner={banner}
           workspaces={workspaces}
           workspaceID={workspaceID}
-          canCreate={Boolean(directory)}
+          canCreate={Boolean(workspaceID)}
           onOpen={setSessionID}
-          onNew={() => void createSession()}
+          onNew={(isolated) => void createSession(isolated)}
           onSignOut={onSignOut}
           onSelectWorkspace={selectWorkspace}
           onAddWorkspace={addWorkspace}

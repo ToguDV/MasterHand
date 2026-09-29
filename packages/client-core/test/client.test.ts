@@ -18,13 +18,13 @@ function recordingFetch(response: () => Response): { calls: FetchCall[]; fetchIm
 }
 
 describe("createClient", () => {
-  it("joins the base URL with the opencode proxy prefix", async () => {
-    const { calls, fetchImpl } = recordingFetch(() => jsonResponse([{ id: "ses_1" }]))
+  it("joins the base URL with the BFF session prefix", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ sessions: [{ id: "ses_1" }] }))
     const client = createClient({ baseUrl: "https://mh.example/", fetchImpl })
 
-    const sessions = await client.api.listSessions()
+    const sessions = await client.api.sessions.list("ws_1")
     expect(sessions).toEqual([{ id: "ses_1" }])
-    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session")
+    expect(calls[0]?.url).toBe("https://mh.example/api/workspaces/ws_1/sessions")
     expect(calls[0]?.init?.credentials).toBe("same-origin")
   })
 
@@ -59,7 +59,7 @@ describe("createClient", () => {
     const { fetchImpl } = recordingFetch(() => new Response("unauthorized", { status: 401 }))
     const client = createClient({ onUnauthorized: () => unauthorized++, fetchImpl })
 
-    await expect(client.api.listSessions()).rejects.toBeInstanceOf(ApiError)
+    await expect(client.api.sessions.list("ws_1")).rejects.toBeInstanceOf(ApiError)
     expect(unauthorized).toBe(1)
   })
 
@@ -120,9 +120,9 @@ describe("client routes", () => {
     await client.auth.status()
     await client.auth.devices()
     await client.auth.revokeDevice("dev/1")
-    await client.api.listSessions()
-    await client.api.createSession()
-    await client.api.deleteSession("ses_1")
+    await client.api.sessions.list("ws_1")
+    await client.api.sessions.create("ws_1")
+    await client.api.sessions.remove("ws_1", "ses_1")
     await client.api.abortSession("ses_1")
     await client.api.messages("ses_1")
     await client.api.promptAsync("ses_1", { parts: [{ type: "text", text: "hi" }] })
@@ -144,9 +144,9 @@ describe("client routes", () => {
       "GET https://mh.example/api/status",
       "GET https://mh.example/api/devices",
       "DELETE https://mh.example/api/devices/dev%2F1",
-      "GET https://mh.example/api/oc/session",
-      "POST https://mh.example/api/oc/session",
-      "DELETE https://mh.example/api/oc/session/ses_1",
+      "GET https://mh.example/api/workspaces/ws_1/sessions",
+      "POST https://mh.example/api/workspaces/ws_1/sessions",
+      "DELETE https://mh.example/api/workspaces/ws_1/sessions/ses_1",
       "POST https://mh.example/api/oc/session/ses_1/abort",
       "GET https://mh.example/api/oc/session/ses_1/message",
       "POST https://mh.example/api/oc/session/ses_1/prompt_async",
@@ -183,8 +183,10 @@ describe("workspace directory routing", () => {
     const { calls, fetchImpl } = recordingFetch(() => jsonResponse([]))
     const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
 
-    await client.api.listSessions("/workspace/my app")
-    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session?directory=%2Fworkspace%2Fmy%20app")
+    await client.api.messages("ses_1", "/workspace/my app")
+    expect(calls[0]?.url).toBe(
+      "https://mh.example/api/oc/session/ses_1/message?directory=%2Fworkspace%2Fmy%20app",
+    )
     expect(new Headers(calls[0]?.init?.headers).has("x-opencode-directory")).toBe(false)
   })
 
@@ -192,17 +194,61 @@ describe("workspace directory routing", () => {
     const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ id: "ses_1" }))
     const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
 
-    await client.api.createSession("/workspace/app")
+    await client.api.abortSession("ses_1", "/workspace/app")
     const headers = new Headers(calls[0]?.init?.headers)
     expect(headers.get("x-opencode-directory")).toBe("%2Fworkspace%2Fapp")
-    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session")
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session/ses_1/abort")
   })
 
   it("omits the directory when none is given", async () => {
     const { calls, fetchImpl } = recordingFetch(() => jsonResponse([]))
     const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
-    await client.api.listSessions()
-    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session")
+    await client.api.messages("ses_1")
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/session/ses_1/message")
+  })
+})
+
+describe("isolated sessions", () => {
+  it("creates an isolated session with the flag in the body", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ session: { id: "ses_1" } }, 201))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    const session = await client.api.sessions.create("ws_1", { isolated: true })
+    expect(session).toEqual({ id: "ses_1" })
+    expect(calls[0]?.url).toBe("https://mh.example/api/workspaces/ws_1/sessions")
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ isolated: true })
+  })
+
+  it("passes the resolved directory when removing a session", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => new Response(null, { status: 204 }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.sessions.remove("ws_1", "ses_1", "/workspace/.worktrees/app/abc")
+    expect(calls[0]?.url).toBe(
+      "https://mh.example/api/workspaces/ws_1/sessions/ses_1?directory=%2Fworkspace%2F.worktrees%2Fapp%2Fabc",
+    )
+  })
+
+  it("finishes an isolated session and unwraps directories", async () => {
+    const { calls, fetchImpl } = recordingFetch((() => {
+      let call = 0
+      return () => {
+        call++
+        if (call === 1) {
+          return jsonResponse({ committed: true, pushed: false, prUrl: null, branch: "b", path: "/p", error: null })
+        }
+        return jsonResponse({ directories: ["/workspace/app", "/workspace/.worktrees/app/abc"] })
+      }
+    })())
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    const result = await client.api.sessions.finish("ses_1")
+    expect(result).toMatchObject({ committed: true, prUrl: null })
+    expect(calls[0]?.url).toBe("https://mh.example/api/isolated-sessions/ses_1/finish")
+
+    const directories = await client.api.sessions.directories("ws_1")
+    expect(directories).toHaveLength(2)
+    expect(calls[1]?.url).toBe("https://mh.example/api/workspaces/ws_1/directories")
   })
 })
 
@@ -225,7 +271,7 @@ describe("client error handling", () => {
   it("falls back to the HTTP status when the error body is empty", async () => {
     const { fetchImpl } = recordingFetch(() => new Response("", { status: 500 }))
     const client = createClient({ fetchImpl })
-    await expect(client.api.listSessions()).rejects.toMatchObject({
+    await expect(client.api.sessions.list("ws_1")).rejects.toMatchObject({
       name: "ApiError",
       status: 500,
       message: "HTTP 500",
@@ -235,14 +281,14 @@ describe("client error handling", () => {
   it("uses the response body as the error message", async () => {
     const { fetchImpl } = recordingFetch(() => new Response("nope", { status: 403 }))
     const client = createClient({ fetchImpl })
-    await expect(client.api.listSessions()).rejects.toMatchObject({ status: 403, message: "nope" })
+    await expect(client.api.sessions.list("ws_1")).rejects.toMatchObject({ status: 403, message: "nope" })
   })
 
   it("does not report 401 for other error codes", async () => {
     let unauthorized = 0
     const { fetchImpl } = recordingFetch(() => new Response("boom", { status: 500 }))
     const client = createClient({ onUnauthorized: () => unauthorized++, fetchImpl })
-    await expect(client.api.listSessions()).rejects.toBeInstanceOf(ApiError)
+    await expect(client.api.sessions.list("ws_1")).rejects.toBeInstanceOf(ApiError)
     expect(unauthorized).toBe(0)
   })
 
@@ -252,7 +298,7 @@ describe("client error handling", () => {
       throw failure
     }) as typeof fetch
     const client = createClient({ fetchImpl })
-    await expect(client.api.listSessions()).rejects.toBe(failure)
+    await expect(client.api.sessions.list("ws_1")).rejects.toBe(failure)
   })
 
   it("omits the Authorization header when no token is available", async () => {
@@ -269,7 +315,7 @@ describe("client error handling", () => {
       text: () => Promise.reject(new Error("stream failed")),
     } as unknown as Response
     const client = createClient({ fetchImpl: (async () => response) as typeof fetch })
-    await expect(client.api.listSessions()).rejects.toMatchObject({ status: 503, message: "HTTP 503" })
+    await expect(client.api.sessions.list("ws_1")).rejects.toMatchObject({ status: 503, message: "HTTP 503" })
   })
 
   it("exposes an event stream bound to the client", () => {

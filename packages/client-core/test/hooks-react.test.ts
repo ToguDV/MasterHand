@@ -13,6 +13,7 @@ import {
   useEventStream,
   useMessages,
   useProviders,
+  useSessionDirectories,
   useSessions,
   useSessionStatuses,
   useWorkspaces,
@@ -26,8 +27,15 @@ function makeEventStream() {
 
 function makeClient(stream = makeEventStream()) {
   const auth = { status: vi.fn(async () => ({ ok: true, opencode: { healthy: true } })) }
+  const sessions = {
+    list: vi.fn(async () => []),
+    create: vi.fn(async () => ({ id: "ses_new" })),
+    remove: vi.fn(async () => {}),
+    finish: vi.fn(async () => ({ committed: true })),
+    directories: vi.fn(async () => []),
+  }
   const api = {
-    listSessions: vi.fn(async () => []),
+    sessions,
     statuses: vi.fn(async () => ({})),
     messages: vi.fn(async () => []),
     agents: vi.fn(async () => []),
@@ -41,6 +49,7 @@ function makeClient(stream = makeEventStream()) {
     stream,
     auth,
     api,
+    sessions,
     workspaces,
     eventStream,
   }
@@ -64,17 +73,21 @@ describe("query hooks", () => {
     expect(result.current.data).toEqual({ ok: true, opencode: { healthy: true } })
   })
 
-  it("useSessions only fetches when enabled", async () => {
+  it("useSessions only fetches when enabled and a workspace is selected", async () => {
     const qc = newQueryClient()
-    const { client, api } = makeClient()
+    const { client, sessions } = makeClient()
 
-    const disabled = renderHook(() => useSessions(client, false), { wrapper: wrapper(qc) })
+    const disabled = renderHook(() => useSessions(client, false, false, "ws_1"), { wrapper: wrapper(qc) })
     expect(disabled.result.current.fetchStatus).toBe("idle")
-    expect(api.listSessions).not.toHaveBeenCalled()
+    expect(sessions.list).not.toHaveBeenCalled()
 
-    const enabled = renderHook(() => useSessions(client, true, false), { wrapper: wrapper(qc) })
+    const missingWorkspace = renderHook(() => useSessions(client, true, false, null), { wrapper: wrapper(qc) })
+    expect(missingWorkspace.result.current.fetchStatus).toBe("idle")
+
+    const enabled = renderHook(() => useSessions(client, true, false, "ws_1"), { wrapper: wrapper(qc) })
     await waitFor(() => expect(enabled.result.current.isSuccess).toBe(true))
-    expect(api.listSessions).toHaveBeenCalledTimes(1)
+    expect(sessions.list).toHaveBeenCalledTimes(1)
+    expect(sessions.list).toHaveBeenCalledWith("ws_1")
   })
 
   it("useSessionStatuses adapts its polling to connectivity", async () => {
@@ -102,14 +115,14 @@ describe("query hooks", () => {
     expect(api.messages).toHaveBeenCalledWith("ses_1", undefined)
   })
 
-  it("useSessions scopes the fetch to a workspace directory", async () => {
+  it("useSessionDirectories loads the directory list for a workspace", async () => {
     const qc = newQueryClient()
-    const { client, api } = makeClient()
-    const { result } = renderHook(() => useSessions(client, true, false, "/workspace/app"), {
+    const { client, sessions } = makeClient()
+    const { result } = renderHook(() => useSessionDirectories(client, true, "ws_1"), {
       wrapper: wrapper(qc),
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(api.listSessions).toHaveBeenCalledWith("/workspace/app")
+    expect(sessions.directories).toHaveBeenCalledWith("ws_1")
   })
 
   it("useWorkspaces loads the registered workspaces", async () => {

@@ -15,7 +15,9 @@ export const queryKeys = {
   config: ["config"] as const,
   workspaces: ["workspaces"] as const,
   /** Session list scoped to a workspace; `queryKeys.sessions` stays the invalidation prefix. */
-  sessionsFor: (directory?: string | null) => ["sessions", directory ?? null] as const,
+  sessionsFor: (workspaceID?: string | null) => ["sessions", workspaceID ?? null] as const,
+  /** Directories holding sessions for a workspace (base folder + worktrees). */
+  directories: (workspaceID?: string | null) => ["directories", workspaceID ?? null] as const,
 }
 
 export function useBffStatus(client: Client, refetchInterval: number | false = false) {
@@ -31,13 +33,21 @@ export function useSessions(
   client: Client,
   enabled: boolean,
   refetchInterval: number | false = 10_000,
-  directory?: string | null,
+  workspaceID?: string | null,
 ) {
   return useQuery({
-    queryKey: queryKeys.sessionsFor(directory),
-    queryFn: () => client.api.listSessions(directory),
-    enabled,
+    queryKey: queryKeys.sessionsFor(workspaceID),
+    queryFn: () => client.api.sessions.list(workspaceID!),
+    enabled: enabled && Boolean(workspaceID),
     refetchInterval,
+  })
+}
+
+export function useSessionDirectories(client: Client, enabled: boolean, workspaceID?: string | null) {
+  return useQuery({
+    queryKey: queryKeys.directories(workspaceID),
+    queryFn: () => client.api.sessions.directories(workspaceID!),
+    enabled: enabled && Boolean(workspaceID),
   })
 }
 
@@ -178,6 +188,7 @@ export function invalidateOnReconnect(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
   void queryClient.invalidateQueries({ queryKey: ["messages"] })
   void queryClient.invalidateQueries({ queryKey: queryKeys.statuses })
+  void queryClient.invalidateQueries({ queryKey: ["directories"] })
 }
 
 export interface UseEventStreamOptions {

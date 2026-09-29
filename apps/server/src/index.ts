@@ -6,6 +6,7 @@ import { createApp } from "./app.js"
 import { loadConfig } from "./config.js"
 import { createEventHub } from "./events.js"
 import { createSqliteStore } from "./store.js"
+import { createWorktreeManager, reconcileWorktrees } from "./worktrees.js"
 
 const config = loadConfig()
 mkdirSync(config.dataDir, { recursive: true })
@@ -17,7 +18,23 @@ const hub = createEventHub({
   authHeader: config.opencodeAuth,
 })
 
-const app = createApp({ config, store, hub })
+const worktrees = createWorktreeManager({
+  userName: config.gitUserName,
+  userEmail: config.gitUserEmail,
+})
+
+try {
+  const reconciled = reconcileWorktrees(store, worktrees, config.worktreesRoot)
+  if (reconciled.droppedRecords.length || reconciled.removedWorktrees.length) {
+    console.log(
+      `[masterhand] worktrees reconciled: ${reconciled.droppedRecords.length} stale record(s), ${reconciled.removedWorktrees.length} orphan(s) removed`,
+    )
+  }
+} catch (error) {
+  console.warn("[masterhand] worktree reconciliation skipped:", error)
+}
+
+const app = createApp({ config, store, hub, worktrees })
 
 if (config.webDist && existsSync(config.webDist)) {
   const webDist = config.webDist

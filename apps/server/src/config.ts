@@ -20,6 +20,11 @@ export interface Config {
   allowedOrigins: string[]
   /** Base directory under which every workspace subfolder is created. */
   workspacesRoot: string
+  /** Base directory for per-session git worktrees (inside the shared mount). */
+  worktreesRoot: string
+  /** Author used for commits MasterHand creates in isolated worktrees. */
+  gitUserName: string
+  gitUserEmail: string
 }
 
 function intFromEnv(value: string | undefined, fallback: number): number {
@@ -61,6 +66,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowedOrigins.add("http://127.0.0.1:5173")
   }
 
+  const workspacesRoot = fromRepoRoot(env.WORKSPACES_ROOT, "workspace")
   return {
     port: intFromEnv(env.PORT, 8787),
     opencodeUrl: env.OPENCODE_URL ?? "http://127.0.0.1:4096",
@@ -72,6 +78,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: fromRepoRoot(env.DATA_DIR, "data"),
     webDist: env.WEB_DIST === "" ? null : (env.WEB_DIST ?? "apps/web/dist"),
     allowedOrigins: [...allowedOrigins],
-    workspacesRoot: fromRepoRoot(env.WORKSPACES_ROOT, "workspace"),
+    workspacesRoot,
+    // Worktrees must live inside the shared mount so opencode sees them.
+    worktreesRoot: env.WORKTREES_ROOT?.trim()
+      ? fromRepoRoot(env.WORKTREES_ROOT, ".worktrees")
+      : resolve(workspacesRoot, ".worktrees"),
+    gitUserName: env.GIT_COMMIT_NAME?.trim() || "MasterHand",
+    gitUserEmail: env.GIT_COMMIT_EMAIL?.trim() || "masterhand@localhost",
   }
 }

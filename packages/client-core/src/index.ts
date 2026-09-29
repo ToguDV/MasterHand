@@ -45,9 +45,11 @@ export {
   useEventStream,
   useMessages,
   useProviders,
+  useSessionDirectories,
   useSessionStatuses,
   useSessions,
   useWorkspaces,
   type EventHandlerCallbacks,
   type UseEventStreamOptions,
 } from "./hooks"
+export { filterSessions, sessionDirectory, type SessionFilter } from "./sessions"
