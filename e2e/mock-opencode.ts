@@ -23,10 +23,16 @@ interface ConversationEntry {
   parts: Part[]
 }
 
+interface PendingPermission {
+  request: Record<string, unknown>
+  sessionID: string
+  resolve: (response: unknown) => void
+}
+
 const sseClients = new Set<ServerResponse>()
 const sessions = new Map<string, Record<string, unknown>>()
 const conversations = new Map<string, ConversationEntry[]>()
-const pendingPermissions = new Map<string, (response: unknown) => void>()
+const pendingPermissions = new Map<string, PendingPermission>()
 
 let sequence = 0
 const nextId = (prefix: string): string => `${prefix}_${(++sequence).toString(36)}`
@@ -168,21 +174,19 @@ async function runPrompt(sessionID: string, text: string, body: Record<string, u
   await delay(40)
 
   const permissionID = nextId("per")
-  const decision = new Promise<unknown>((resolve) => pendingPermissions.set(permissionID, resolve))
-  broadcast({
-    type: "permission.updated",
-    properties: {
-      id: permissionID,
-      type: "bash",
-      pattern: "ls",
-      sessionID,
-      messageID: assistant.info.id,
-      callID: nextId("call"),
-      title: "Run `ls`",
-      metadata: { command: "ls" },
-      time: { created: now() },
-    },
-  })
+  const request = {
+    id: permissionID,
+    sessionID,
+    permission: "bash",
+    patterns: ["ls"],
+    metadata: { command: "ls" },
+    always: ["ls *"],
+    tool: { messageID: assistant.info.id, callID: nextId("call") },
+  }
+  const decision = new Promise<unknown>((resolve) =>
+    pendingPermissions.set(permissionID, { request, sessionID, resolve }),
+  )
+  broadcast({ type: "permission.asked", properties: request })
   await decision
 
   await delay(40)
@@ -203,6 +207,13 @@ const server = createServer((req, res) => {
   void (async () => {
     if (req.method === "GET" && path === "/global/health") return json(res, 200, { healthy: true, version: "1.18.32" })
     if (req.method === "GET" && path === "/global/event") return openStream(res)
+    if (req.method === "GET" && path === "/permission") {
+      const directory = url.searchParams.get("directory")
+      const list = [...pendingPermissions.values()]
+        .filter((pending) => !directory || sessions.get(pending.sessionID)?.directory === directory)
+        .map((pending) => pending.request)
+      return json(res, 200, list)
+    }
     if (req.method === "GET" && path === "/session") {
       const directory = url.searchParams.get("directory")
       const list = [...sessions.values()].filter((session) => !directory || session.directory === directory)
@@ -270,10 +281,15 @@ const server = createServer((req, res) => {
         return json(res, 200, true)
       }
       if (req.method === "POST" && segments[2] === "permissions" && segments[3]) {
-        const resolve = pendingPermissions.get(segments[3])
-        if (resolve) {
+        const pending = pendingPermissions.get(segments[3])
+        if (pending) {
+          const body = await readBody(req)
           pendingPermissions.delete(segments[3])
-          resolve(await readBody(req))
+          broadcast({
+            type: "permission.replied",
+            properties: { sessionID: pending.sessionID, requestID: segments[3], reply: body.response },
+          })
+          pending.resolve(body)
         }
         return json(res, 200, true)
       }

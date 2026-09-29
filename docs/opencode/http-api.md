@@ -33,7 +33,8 @@ Verified on **2026-09-27** against the [official server docs](https://opencode.a
 | `POST` | `/session/:id/prompt_async` | **Send prompt without waiting (204); main UI flow** |
 | `POST` | `/session/:id/message` | Send prompt and wait for the full response (alternative) |
 | `POST` | `/session/:id/abort` | Stop an in-progress turn |
-| `POST` | `/session/:id/permissions/:permissionID` | Answer permission; body `{ response, remember? }` |
+| `GET` | `/permission` | Pending permission requests; `?directory=` scopes it to one project (used to reconcile missed events) |
+| `POST` | `/session/:id/permissions/:permissionID` | Answer permission; body `{ response: "once" \| "always" \| "reject" }` |
 | `GET` | `/session/:id/diff` | Session diffs (post-MVP) |
 | `POST` | `/session/:id/summarize` | Summary (post-MVP) |
 | `POST` | `/session/:id/revert` · `/unrevert` | Revert/restore messages (post-MVP) |

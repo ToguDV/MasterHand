@@ -191,7 +191,30 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     [],
   )
 
-  const handleConnect = useCallback(() => invalidateOnReconnect(queryClient), [])
+  // `permission.asked` events are lost while the app is backgrounded and never
+  // replayed. Reconcile against opencode on connect and when workspaces load.
+  const syncPermissions = useCallback(async () => {
+    const directories = (workspacesQuery.data ?? []).map((item) => item.path)
+    try {
+      const lists = await Promise.all(
+        directories.map((dir) => client.api.permissions(dir).catch(() => [] as Permission[])),
+      )
+      const pending = lists.flat()
+      if (pending.length === 0) return
+      setPermissions((prev) => {
+        const byId = new Map(prev.map((item) => [item.id, item]))
+        for (const item of pending) byId.set(item.id, item)
+        return [...byId.values()]
+      })
+    } catch {
+      // best effort: a missed stream event is not worth surfacing an error
+    }
+  }, [workspacesQuery.data])
+
+  const handleConnect = useCallback(() => {
+    invalidateOnReconnect(queryClient)
+    void syncPermissions()
+  }, [syncPermissions])
 
   useEventStream(client, {
     enabled: true,
@@ -201,11 +224,16 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
   })
 
   useEffect(() => {
+    if (!workspacesQuery.data) return
+    void syncPermissions()
+  }, [workspacesQuery.data, syncPermissions])
+
+  useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") invalidateOnReconnect(queryClient)
+      if (state === "active") syncPermissions()
     })
     return () => subscription.remove()
-  }, [])
+  }, [syncPermissions])
 
   async function createSession() {
     if (!directory) {
@@ -265,12 +293,13 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     if (!permission) return
     setResponding(true)
     try {
-      await client.api.respondPermission(permission.sessionID, permission.id, response, directory)
+      const answered = await client.api.respondPermission(permission.sessionID, permission.id, response)
+      if (answered === false) setBanner("This permission was already answered")
+      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     } catch {
       setBanner("Could not answer the permission request")
     } finally {
       setResponding(false)
-      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     }
   }
 

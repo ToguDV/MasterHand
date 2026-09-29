@@ -126,6 +126,7 @@ describe("client routes", () => {
     await client.api.abortSession("ses_1")
     await client.api.messages("ses_1")
     await client.api.promptAsync("ses_1", { parts: [{ type: "text", text: "hi" }] })
+    await client.api.permissions()
     await client.api.respondPermission("ses_1", "per_1", "once")
     await client.api.agents()
     await client.api.providers()
@@ -149,6 +150,7 @@ describe("client routes", () => {
       "POST https://mh.example/api/oc/session/ses_1/abort",
       "GET https://mh.example/api/oc/session/ses_1/message",
       "POST https://mh.example/api/oc/session/ses_1/prompt_async",
+      "GET https://mh.example/api/oc/permission",
       "POST https://mh.example/api/oc/session/ses_1/permissions/per_1",
       "GET https://mh.example/api/oc/agent",
       "GET https://mh.example/api/oc/config/providers",

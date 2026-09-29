@@ -97,6 +97,21 @@ export function createEventHandler(
   callbacks: EventHandlerCallbacks = {},
 ): (event: unknown) => void {
   return (raw) => {
+    const type = (raw as { type?: string } | null)?.type
+
+    // opencode 1.18.32 emits `permission.asked`/`permission.replied`; older
+    // servers and the SDK types still use `permission.updated`. Accept both.
+    if (type === "permission.asked" || type === "permission.updated") {
+      callbacks.onPermission?.((raw as { properties: Permission }).properties)
+      return
+    }
+    if (type === "permission.replied") {
+      const props = (raw as { properties?: { requestID?: string; permissionID?: string } }).properties
+      const id = props?.requestID ?? props?.permissionID
+      if (id) callbacks.onPermissionReplied?.(id)
+      return
+    }
+
     const event = raw as Event
     switch (event.type) {
       case "session.created":
@@ -149,12 +164,6 @@ export function createEventHandler(
         )
         break
       }
-      case "permission.updated":
-        callbacks.onPermission?.(event.properties)
-        break
-      case "permission.replied":
-        callbacks.onPermissionReplied?.(event.properties.permissionID)
-        break
       case "session.error": {
         const message = opencodeErrorMessage(event.properties.error)
         if (message) callbacks.onSessionError?.(message)

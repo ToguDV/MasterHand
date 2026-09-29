@@ -77,10 +77,11 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 
 ### 4.2 Permission approvals
 
-1. The agent requests permission → `permission.updated` event with `properties: Permission` (`id`, `type`, `pattern?`, `sessionID`, `messageID`, `callID?`, `title`, `metadata`, `time.created`).
+1. The agent requests permission → `permission.asked` event with `properties: Permission` (`id`, `sessionID`, `permission`, `patterns`, `metadata`, `always`, `tool.{messageID,callID}`). Verified against opencode 1.18.32; the published SDK types still describe the older `permission.updated` payload, which the server no longer emits.
 2. The client shows a modal with the context.
-3. The user answers → `POST /api/oc/session/:id/permissions/:permissionID` with `{ response, remember? }`.
-4. opencode emits `permission.replied` (`{ sessionID, permissionID, response }`) and all devices sync.
+3. The user answers → `POST /api/oc/session/:id/permissions/:permissionID` with `{ response }` (`once` / `always` / `reject`). The session id resolves the request, so no directory override is needed.
+4. opencode emits `permission.replied` (`{ sessionID, requestID, reply }`) and all devices sync.
+5. SSE does not replay across reconnects, so on (re)connect clients reconcile pending requests with `GET /api/oc/permission?directory=<workspace>` for every workspace; otherwise a missed `permission.asked` would leave the agent blocked with no UI.
 
 ### 4.3 Authentication (single user, multiple devices)
 
@@ -92,7 +93,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 
 ### 4.4 Notifications (in-app)
 
-- The BFF's SSE relay drives in-app notifications in every client: `session.idle`, `permission.updated` and `session.error` update a badge/indicator.
+- The BFF's SSE relay drives in-app notifications in every client: `session.idle`, `permission.asked` and `session.error` update a badge/indicator.
 - Tapping a notification opens the corresponding session.
 - Native push (FCM/APNs) is out of scope for the MVP and listed in the backlog.
 
@@ -103,6 +104,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 - `message.part.updated` is applied with a merge by `part.id`: if the incoming text matches the local text, `delta` is appended; if a full snapshot arrives, it replaces (supports both server modes).
 - Client inactivity watchdog (60s without bytes → forced reconnect), reconnect when the tab/app becomes visible (`visibilitychange`) and when the network returns (`online`).
 - On (re)connect, `sessions`, `messages` and `statuses` are invalidated to reconcile missed events.
+- Pending permissions are reconciled too (`GET /api/oc/permission` per workspace): a `permission.asked` lost while offline would otherwise leave the agent blocked with no prompt.
 - Fallback without SSE: connection down → polling (messages every 5s, statuses every 4s); active turn → messages every 3s.
 
 ### 4.6 Workspaces (isolated project folders)
