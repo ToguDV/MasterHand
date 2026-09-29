@@ -1,5 +1,11 @@
-import { useEffect, useRef } from "react"
-import { sessionUsage, useMessages } from "@masterhand/client-core"
+import { useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
+import {
+  sessionUsage,
+  useMessages,
+  type FinishSessionResult,
+  type SessionIsolation,
+} from "@masterhand/client-core"
 import { client } from "../client"
 import { AssistantBlock, UserBubble } from "./MessageContent"
 import { Composer } from "./Composer"
@@ -9,6 +15,7 @@ export function ChatView({
   busy,
   connected,
   directory,
+  isolation,
   autoAccept,
   onToggleAutoAccept,
   onOpenSession,
@@ -17,16 +24,36 @@ export function ChatView({
   busy: boolean
   connected: boolean
   directory?: string | null
+  isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
   onOpenSession?: (id: string) => void
 }) {
+  const queryClient = useQueryClient()
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
+  const [finishing, setFinishing] = useState(false)
+  const [finishResult, setFinishResult] = useState<FinishSessionResult | null>(null)
+  const [finishError, setFinishError] = useState<string | null>(null)
 
   const messages = messagesQuery.data ?? []
   const usage = sessionUsage(messages)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+
+  async function finish() {
+    setFinishing(true)
+    setFinishError(null)
+    try {
+      const result = await client.api.sessions.finish(sessionID)
+      setFinishResult(result)
+      if (result.error) setFinishError(result.error)
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+    } catch {
+      setFinishError("Could not finish the session")
+    } finally {
+      setFinishing(false)
+    }
+  }
 
   useEffect(() => {
     const element = scrollRef.current
@@ -69,6 +96,58 @@ export function ChatView({
             Session · ${usage.cost.toFixed(4)}
             {usage.tokens > 0 ? ` · ${usage.tokens} tok` : ""}
           </p>
+        </div>
+      )}
+      {isolation && (
+        <div className="border-t border-zinc-800 px-3 py-2 md:px-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 text-xs">
+            <span className="text-zinc-500">Isolated worktree</span>
+            <code
+              className="max-w-full truncate rounded bg-zinc-900 px-1.5 py-0.5 text-indigo-300"
+              title={isolation.worktreePath}
+            >
+              {isolation.branch}
+            </code>
+            {isolation.prUrl && (
+              <a
+                href={isolation.prUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-indigo-400 hover:underline"
+              >
+                Pull request ↗
+              </a>
+            )}
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={() => void finish()}
+              disabled={finishing}
+              title="Commit the worktree and push the branch (PR when a provider CLI is available)"
+              className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 font-medium text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+            >
+              {finishing ? "Finishing…" : "Finish & PR"}
+            </button>
+          </div>
+          {(finishResult || finishError) && (
+            <p className="mx-auto mt-1 w-full max-w-3xl text-[11px] text-zinc-500">
+              {finishResult
+                ? finishResult.committed
+                  ? "Changes committed."
+                  : "No changes to commit."
+                : null}
+              {finishResult?.pushed ? " Branch pushed." : null}
+              {finishResult?.prUrl && (
+                <>
+                  {" "}
+                  <a href={finishResult.prUrl} target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+                    Open pull request ↗
+                  </a>
+                </>
+              )}
+              {finishError ? <span className="text-red-400">{finishError}</span> : null}
+            </p>
+          )}
         </div>
       )}
       <Composer

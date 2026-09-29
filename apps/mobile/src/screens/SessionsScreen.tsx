@@ -2,9 +2,11 @@ import { useState } from "react"
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native"
 import {
   directoryName,
+  filterSessions,
   formatRelative,
   type CreateWorkspaceInput,
   type Session,
+  type SessionFilter,
   type SessionStatuses,
   type WorkspaceRecord,
 } from "@masterhand/client-core"
@@ -40,7 +42,7 @@ export function SessionsScreen({
   workspaceID: string | null
   canCreate: boolean
   onOpen: (sessionID: string) => void
-  onNew: () => void
+  onNew: (isolated: boolean) => void
   onSignOut: () => void
   onSelectWorkspace: (id: string) => void
   onAddWorkspace: (input: CreateWorkspaceInput) => Promise<void>
@@ -48,7 +50,16 @@ export function SessionsScreen({
   onDeleteSession: (id: string) => void
 }) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [filter, setFilter] = useState<SessionFilter>("all")
+  const [isolated, setIsolated] = useState(false)
   const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
+  const visible = filterSessions(sessions, filter)
+
+  const FILTERS: Array<{ value: SessionFilter; label: string }> = [
+    { value: "all", label: "All" },
+    { value: "isolated", label: "Isolated" },
+    { value: "standard", label: "Standard" },
+  ]
 
   function confirmDeleteSession(session: Session): void {
     Alert.alert("Delete session", `Delete "${session.title || "Untitled"}" and all its data?`, [
@@ -76,13 +87,39 @@ export function SessionsScreen({
         <Text style={styles.title}>Sessions</Text>
         <View style={styles.headerRight}>
           <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.warning }]} />
-          <Pressable style={[styles.newButton, !canCreate && styles.disabled]} onPress={onNew} disabled={creating || !canCreate}>
+          <Pressable
+            style={[styles.newButton, !canCreate && styles.disabled]}
+            onPress={() => onNew(isolated)}
+            disabled={creating || !canCreate}
+          >
             <Text style={styles.newButtonText}>{creating ? "Creating…" : "+ New"}</Text>
           </Pressable>
           <Pressable onPress={onSignOut}>
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
         </View>
+      </View>
+
+      <View style={styles.filterRow}>
+        <View style={styles.filters}>
+          {FILTERS.map((option) => (
+            <Pressable
+              key={option.value}
+              onPress={() => setFilter(option.value)}
+              style={[styles.chip, filter === option.value && styles.chipActive]}
+            >
+              <Text style={[styles.chipText, filter === option.value && styles.chipTextActive]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Pressable style={styles.isolatedToggle} onPress={() => setIsolated((value) => !value)}>
+          <View style={[styles.checkbox, isolated && styles.checkboxChecked]}>
+            {isolated ? <Text style={styles.checkboxMark}>✓</Text> : null}
+          </View>
+          <Text style={styles.isolatedLabel}>Isolated</Text>
+        </Pressable>
       </View>
 
       <Pressable style={styles.workspaceBar} onPress={() => setWorkspaceOpen(true)}>
@@ -97,12 +134,18 @@ export function SessionsScreen({
       {!connected ? <Text style={styles.banner}>Reconnecting to the server…</Text> : null}
 
       <FlatList
-        data={sessions}
+        data={visible}
         keyExtractor={(session) => session.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {loading ? "Loading…" : canCreate ? "No sessions yet." : "Add a workspace to start working on a project."}
+            {loading
+              ? "Loading…"
+              : canCreate
+                ? filter === "all"
+                  ? "No sessions yet."
+                  : "No sessions match this filter."
+                : "Add a workspace to start working on a project."}
           </Text>
         }
         renderItem={({ item }) => (
@@ -155,6 +198,13 @@ function SessionRow({
           <Text style={styles.rowTitle} numberOfLines={1}>
             {session.title || "Untitled"}
           </Text>
+          {session.isolation ? (
+            <View style={styles.branchBadge}>
+              <Text style={styles.branchText} numberOfLines={1}>
+                {session.isolation.branch}
+              </Text>
+            </View>
+          ) : null}
         </View>
         <Text style={styles.rowMeta}>
           {directoryName(session.directory)} · {formatRelative(session.time.updated)}
@@ -270,6 +320,18 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
   },
+  branchBadge: {
+    maxWidth: 130,
+    backgroundColor: "rgba(99, 102, 241, 0.15)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  branchText: {
+    color: "#a5b4fc",
+    fontSize: 10,
+    fontWeight: "600",
+  },
   rowMeta: {
     color: colors.muted,
     fontSize: 12,
@@ -283,6 +345,64 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 20,
     lineHeight: 22,
+  },
+  filterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  filters: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  chip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  chipActive: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  chipText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  chipTextActive: {
+    color: colors.text,
+  },
+  isolatedToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  checkbox: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.muted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxChecked: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  checkboxMark: {
+    color: colors.text,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "700",
+  },
+  isolatedLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
   },
   disabled: {
     opacity: 0.5,

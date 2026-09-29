@@ -39,9 +39,16 @@ Other rules:
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
 | `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Workspaces, oldest first |
 | `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "name": "my-project" }`. The BFF creates `<WORKSPACES_ROOT>/<name>` (mkdir -p) and returns it. `name` becomes both the folder and the display name. `400` invalid name (separators, traversal, leading dot, >64 chars), `409` already registered |
-| `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list. With `?deleteFiles=1` it also deletes the folder and its files from disk (only when the path is inside `WORKSPACES_ROOT`, otherwise `403`); without it, files and opencode sessions are untouched. `404` unknown workspace |
+| `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list and cleans up its isolated worktrees and records. With `?deleteFiles=1` it also deletes the folder and its files from disk (only when the path is inside `WORKSPACES_ROOT`, otherwise `403`); without it, files and opencode sessions are untouched. `404` unknown workspace |
+| `GET` | `/api/workspaces/:id/directories` | `{ directories: string[] }` | Workspace folder plus every isolated worktree of the workspace (used to reconcile pending permissions per directory) |
+| `GET` | `/api/workspaces/:id/sessions` | `{ sessions: Session[] }` | Aggregates opencode sessions from the workspace folder and every worktree. Isolated sessions (and subagent children) carry `isolation: { isolated: true, worktreePath, branch, baseRef, pushed, prUrl }`. `502` when opencode is unreachable |
+| `POST` | `/api/workspaces/:id/sessions` | `201 { session, isolation }` | Body: `{ "isolated": true }` optional. Standard sessions are created in the workspace folder (`isolation: null`). Isolated sessions `git init` the workspace when needed, create a worktree under `WORKTREES_ROOT`, create the opencode session there and return the `isolation` metadata. On failure the worktree is rolled back (`500 isolation_failed`) |
+| `DELETE` | `/api/workspaces/:id/sessions/:sessionID` | `{ ok: true }` | Deletes the opencode session. For isolated sessions it also removes the worktree and the branch. Optional `?directory=` targets the session's directory (worktree for subagent children); `403` when it is not one of the workspace directories. `404` unknown workspace |
+| `POST` | `/api/isolated-sessions/:sessionID/finish` | `{ committed, pushed, prUrl, branch, path, error }` | Commits everything in the worktree. With a remote it pushes the branch and tries `gh`/`glab` for the PR, falling back to a provider compare URL; `error` reports a failed push. `404` for unknown/non-isolated sessions |
 
 `workspace` shape: `{ id, name, path, createdAt }`. Each workspace is a subfolder that MasterHand creates and owns under `WORKSPACES_ROOT`, so it is always a single, isolated directory. opencode has no project-deletion endpoint, so deleting the record in MasterHand (optionally with its files) is how a workspace goes away.
+
+`isolation` shape: `{ isolated: true, worktreePath, branch, baseRef, pushed?, prUrl? }`. Worktrees live at `<WORKTREES_ROOT>/<workspace>/<token>` (default `<WORKSPACES_ROOT>/.worktrees`) with branch `masterhand/<slug>-<token>`; one branch per worktree (git forbids checking out the same branch twice).
 
 ## Proxy to opencode
 
@@ -82,4 +89,7 @@ curl -X POST https://your-origin.example/api/devices \
 | `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` | — / `opencode` | Basic auth to opencode |
 | `DATA_DIR` | `<repo-root>/data` | SQLite path (`/data` in Docker). Relative values resolve against the repo root |
 | `WORKSPACES_ROOT` | `<repo-root>/workspace` | Base directory where workspaces are created as subfolders. Point it at the same folder opencode sees (e.g. `/workspace` in Docker). Relative values resolve against the repo root |
+| `WORKTREES_ROOT` | `<WORKSPACES_ROOT>/.worktrees` | Base directory for per-session git worktrees. Must stay inside the mount opencode sees |
+| `GIT_COMMIT_NAME` / `GIT_COMMIT_EMAIL` | `MasterHand` / `masterhand@localhost` | Author for commits MasterHand creates in isolated worktrees |
+| `GH_TOKEN` / `GITLAB_TOKEN` | — | Optional: credentials for `gh`/`glab` and git push inside the BFF container (see the deployment runbook) |
 | `WEB_DIST` | `apps/web/dist` | Web build served by the BFF |

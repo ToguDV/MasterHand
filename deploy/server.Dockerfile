@@ -33,7 +33,16 @@ ENV NODE_ENV=production
 ENV DATA_DIR=/data
 WORKDIR /app
 
-RUN mkdir -p /data && chown node:node /data
+# git is required for isolated sessions (git worktrees); gh is optional and only
+# used to open pull requests when it is authenticated (otherwise MasterHand
+# hands back a compare URL). glab can be added by extending this image.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git gh ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && mkdir -p /data && chown node:node /data \
+  # The bind-mounted workspace may be owned by a different host uid; git would
+  # otherwise refuse to operate on it ("dubious ownership").
+  && git config --system --add safe.directory '*'
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json

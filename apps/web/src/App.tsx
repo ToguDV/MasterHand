@@ -4,8 +4,10 @@ import {
   ApiError,
   createEventHandler,
   invalidateOnReconnect,
+  sessionDirectory,
   useBffStatus,
   useEventStream,
+  useSessionDirectories,
   useSessions,
   useSessionStatuses,
   useWorkspaces,
@@ -145,13 +147,14 @@ export default function App() {
   }, [workspacesQuery.data, workspaceID, selectWorkspace])
 
   const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
-  const directory = workspace?.path ?? null
+  const workspacePath = workspace?.path ?? null
+  const directoriesQuery = useSessionDirectories(client, authed === true, workspaceID)
 
   // `permission.asked` events are lost while disconnected and never replayed.
   // On connect (and once workspaces load) reconcile against opencode, which
-  // exposes pending requests per workspace directory.
+  // exposes pending requests per directory (workspace folder + worktrees).
   const syncPermissions = useCallback(async () => {
-    const directories = (workspacesQuery.data ?? []).map((item) => item.path)
+    const directories = directoriesQuery.data ?? (workspacePath ? [workspacePath] : [])
     try {
       const lists = await Promise.all(
         directories.map((dir) => client.api.permissions(dir).catch(() => [] as Permission[])),
@@ -166,7 +169,7 @@ export default function App() {
     } catch {
       // best effort: a missed stream event is not worth surfacing an error
     }
-  }, [workspacesQuery.data])
+  }, [directoriesQuery.data, workspacePath])
 
   const handleConnect = useCallback(() => {
     invalidateOnReconnect(queryClient)
@@ -224,7 +227,7 @@ export default function App() {
     }
   }, [authed, queryClient])
 
-  const sessionsQuery = useSessions(client, authed === true, 10_000, directory)
+  const sessionsQuery = useSessions(client, authed === true, 10_000, workspaceID)
   const statusesQuery = useSessionStatuses(client, authed === true, connected)
 
   useEffect(() => {
@@ -239,6 +242,8 @@ export default function App() {
   const selected = sessions.find((session) => session.id === sessionID) ?? null
   const parentSessionID = selected?.parentID ?? null
   const busy = sessionID ? statuses[sessionID]?.type === "busy" : false
+  // Isolated sessions run in their worktree; everything else in the workspace.
+  const directory = sessionDirectory(selected, workspacePath)
 
   const handleLogout = useCallback(async () => {
     await client.auth.logout().catch(() => {})
@@ -248,16 +253,17 @@ export default function App() {
     openSession(null)
   }, [queryClient, openSession])
 
-  async function createSession() {
-    if (!directory) {
+  async function createSession(isolated: boolean) {
+    if (!workspaceID) {
       setBanner("Add a workspace first")
       return
     }
     setCreating(true)
     setBanner(null)
     try {
-      const session = await client.api.createSession(directory)
+      const session = await client.api.sessions.create(workspaceID, { isolated })
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      void queryClient.invalidateQueries({ queryKey: ["directories"] })
       openSession(session.id)
     } catch {
       setBanner("Could not create the session")
@@ -267,11 +273,14 @@ export default function App() {
   }
 
   async function deleteSession(id: string) {
+    if (!workspaceID) return
     if (!window.confirm("Delete this session and all its data?")) return
+    const target = sessions.find((session) => session.id === id) ?? null
     try {
-      await client.api.deleteSession(id, directory)
+      await client.api.sessions.remove(workspaceID, id, sessionDirectory(target, workspacePath))
       if (sessionID === id) openSession(null)
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      void queryClient.invalidateQueries({ queryKey: ["directories"] })
     } catch {
       setBanner("Could not delete the session")
     }
@@ -382,10 +391,10 @@ export default function App() {
             statuses={statuses}
             selectedID={sessionID}
             onSelect={openSession}
-            onNew={() => void createSession()}
+            onNew={(isolated) => void createSession(isolated)}
             onDelete={(id) => void deleteSession(id)}
             creating={creating}
-            canCreate={Boolean(directory)}
+            canCreate={Boolean(workspaceID)}
           />
         </aside>
 
@@ -397,6 +406,7 @@ export default function App() {
               busy={busy}
               connected={connected}
               directory={directory}
+              isolation={selected?.isolation}
               autoAccept={autoAcceptSessions.includes(sessionID)}
               onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
               onOpenSession={openSession}

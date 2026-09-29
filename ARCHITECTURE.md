@@ -43,7 +43,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 | Desktop client | `apps/desktop` | Electron (main process, hardened renderer) | Thin shell that loads the BFF-served web app (`MASTERHAND_URL`, default `http://localhost:8787`) with navigation locked to that origin |
 | Mobile client | `apps/mobile` | React Native + Expo | Native iOS/Android UI (login with device token, workspace picker, sessions with delete, chat, permissions) |
 | `packages/client-core` | TypeScript (framework-agnostic + React hooks) | API client, TanStack Query hooks, SSE handling, auth adapters, generated opencode types |
-| BFF | `apps/server` | Node 22 + Hono (`@hono/node-server`) | Auth (cookie + token), proxy to opencode, SSE relay, device/token storage, rate limit |
+| BFF | `apps/server` | Node 22 + Hono (`@hono/node-server`) | Auth (cookie + token), proxy to opencode, SSE relay, device/token storage, rate limit, workspaces and git worktrees |
 | Agent engine | `opencode` container | `opencode serve` (pinned version) | Runs agents and tools; OpenAPI 3.1 + SSE; data on volumes |
 | TLS / reverse proxy | Deployer-owned | Any | TLS termination and security headers; out of the repository's scope |
 | BFF persistence | `masterhand` container | SQLite (better-sqlite3) | Device/token records; minimal config |
@@ -116,6 +116,17 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 - Deleting a workspace forgets it in MasterHand. With `?deleteFiles=1` (a checkbox in the UI) the BFF also removes the folder and its files; it refuses (`403`) when the stored path lies outside the root. Deleting a session calls `DELETE /session/:id` with the workspace directory and removes its data.
 - The BFF persists the list and owns folder creation/deletion; opencode works inside the same mounted root.
 
+### 4.7 Isolated sessions (git worktrees)
+
+Several agents working in the same workspace share its folder, so they can overwrite each other's files. **Isolated mode** gives an opt-in session its own git worktree and branch; everything else stays as in §4.6.
+
+1. At creation the client sends `{ isolated: true }` to `POST /api/workspaces/:id/sessions`. The BFF `git init`s the workspace (with an empty first commit) when it is not a repo yet, then creates the worktree at `<WORKTREES_ROOT>/<workspace>/<token>` — inside the shared mount (opencode sees it) but outside the repo (git requires it) — with branch `masterhand/<slug>-<token>` from the current HEAD.
+2. The BFF creates the opencode session in that worktree directory and stores the mapping in the `isolated_sessions` table (`session_id`, `workspace_id`, `path`, `branch`, `base_ref`, `pushed`, `pr_url`).
+3. `GET /api/workspaces/:id/sessions` aggregates the workspace folder and every worktree of that workspace and annotates each isolated session (and its subagent children, which share the parent directory) with `isolation: { worktreePath, branch, baseRef }`. Clients resolve the `directory` override per session from it; `GET /api/workspaces/:id/directories` lists the directories for permission reconciliation.
+4. **Finish & PR** (`POST /api/isolated-sessions/:id/finish`, an explicit action) commits everything in the worktree; when the repo has a remote it pushes the branch and tries `gh`/`glab` for the PR, falling back to a provider compare URL. There is **no auto-merge**.
+5. Deleting the session (or its workspace) removes the worktree and the branch and drops the record. A startup reconciliation drops records whose folder disappeared and removes orphan worktrees under the root.
+6. Clients show an isolated toggle at creation, a branch badge per session, an All/Isolated/Standard filter and the worktree bar with the Finish action.
+
 ## 5. Security model
 
 | Layer | Measure |
@@ -148,7 +159,7 @@ deploy/
 - `restart: unless-stopped` on all services → the host restarts and the stack comes back on its own.
 - The deployer points their own TLS/domain at the published BFF port and sets `ALLOWED_ORIGINS` if a different origin proxies to it. Bind to `127.0.0.1` with `MASTERHAND_BIND` when the reverse proxy runs on the host.
 - Provider authentication: `docker compose run --rm opencode auth login` (persists to a volume).
-- Agents work under `./workspace` (bind mount) so files can be inspected/versioned from the host; the BFF creates one subfolder per workspace there.
+- Agents work under `./workspace` (bind mount) so files can be inspected/versioned from the host; the BFF creates one subfolder per workspace there and per-session git worktrees under `.worktrees/` (same mount, so opencode sees them).
 - Backups: volumes `masterhand_data`, `opencode_data` and `opencode_config`.
 - Upgrade: opencode pinned; `docker compose build && docker compose up -d`.
 - See `docs/runbooks/deployment.md` for concrete TLS options.
@@ -168,6 +179,7 @@ deploy/
 | ADR-9 | In-app SSE notifications for the MVP; native push deferred | No APNs/FCM accounts or extra infrastructure required | Native push now (cost), Web Push (implies service worker / PWA) |
 | ADR-10 | Adopt the YAGNI ladder as a written guideline in `AGENTS.md`; do not install the third-party `ponytail` plugin | Keeps the minimalism principle without an always-on external prompt that would fight documented decisions or alter subagent behavior | Installing the `ponytail` plugin (third-party supply chain, injects rules into every turn and subagent, conflicts with the spec-driven approach) |
 | ADR-11 | Workspaces are subfolders MasterHand creates under a single configured root; the BFF owns the records and the folders, and opencode is targeted per request with its `directory` override | opencode has no project-deletion endpoint, so a deletable "workspace" must be owned by MasterHand; deriving the path from a sanitized name keeps every project isolated under one root and removes unsafe absolute paths | Registering arbitrary existing absolute paths (escapes the root, requires the user to pre-create folders), listing `GET /project` directly (no deletion possible), opencode's experimental v2 workspaces (git worktrees, not folders, unstable) |
+| ADR-12 | Isolated sessions use BFF-managed git worktrees, opt-in per session, with a branch per session and an explicit Finish & PR action (no auto-merge) | Git worktrees are the natural way to give concurrent agents disjoint files; the BFF already owns workspaces and opencode accepts a per-request `directory`, so no unstable opencode API is needed. Opt-in avoids a worktree/branch per throwaway session, and a manual finish avoids surprising merges | Automatic worktree per session (branch/disk bloat), one workspace per session (no merge path, manual), opencode v2 worktree/workspace API (experimental, not in the pinned version), per-workspace lock (kills parallelism) |
 
 ## 8. Risks
 

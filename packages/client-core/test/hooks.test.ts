@@ -27,9 +27,11 @@ describe("queryKeys", () => {
     expect(queryKeys.sessions).toEqual(["sessions"])
   })
 
-  it("scopes session keys by workspace directory", () => {
-    expect(queryKeys.sessionsFor("/workspace/app")).toEqual(["sessions", "/workspace/app"])
+  it("scopes session keys by workspace and directory keys", () => {
+    expect(queryKeys.sessionsFor("ws_1")).toEqual(["sessions", "ws_1"])
     expect(queryKeys.sessionsFor()).toEqual(["sessions", null])
+    expect(queryKeys.directories("ws_1")).toEqual(["directories", "ws_1"])
+    expect(queryKeys.directories()).toEqual(["directories", null])
   })
 })
 
@@ -167,11 +169,12 @@ describe("createEventHandler", () => {
 })
 
 describe("invalidateOnReconnect", () => {
-  it("refreshes sessions, messages and statuses", () => {
+  it("refreshes sessions, messages, statuses and directories", () => {
     const { qc, invalidate } = makeQueryClient()
     invalidateOnReconnect(qc)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["messages"] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.statuses })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["directories"] })
   })
 })

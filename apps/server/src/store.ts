@@ -14,6 +14,21 @@ export interface WorkspaceRecord {
   createdAt: number
 }
 
+/**
+ * A session running in its own git worktree (isolated mode). `path` is the
+ * worktree directory opencode works in; `branch` is the checked-out branch.
+ */
+export interface IsolatedSessionRecord {
+  sessionID: string
+  workspaceID: string
+  path: string
+  branch: string
+  baseRef: string
+  pushed: boolean
+  prUrl: string | null
+  createdAt: number
+}
+
 export interface Store {
   create(record: DeviceRecord): void
   get(id: string): DeviceRecord | null
@@ -25,6 +40,11 @@ export interface Store {
   getWorkspaceByPath(path: string): WorkspaceRecord | null
   createWorkspace(record: WorkspaceRecord): void
   removeWorkspace(id: string): void
+  listIsolatedSessions(workspaceID?: string): IsolatedSessionRecord[]
+  getIsolatedSession(sessionID: string): IsolatedSessionRecord | null
+  createIsolatedSession(record: IsolatedSessionRecord): void
+  updateIsolatedSession(sessionID: string, patch: { pushed?: boolean; prUrl?: string | null }): void
+  removeIsolatedSession(sessionID: string): void
   close(): void
 }
 
@@ -44,6 +64,18 @@ export function createSqliteStore(file: string): Store {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       path TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS isolated_sessions (
+      session_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      base_ref TEXT NOT NULL,
+      pushed INTEGER NOT NULL DEFAULT 0,
+      pr_url TEXT,
       created_at INTEGER NOT NULL
     )
   `)
@@ -88,6 +120,35 @@ export function createSqliteStore(file: string): Store {
   `)
   const removeWorkspaceStatement = db.prepare("DELETE FROM workspaces WHERE id = ?")
 
+  const isolatedSessionColumns = `
+    SELECT session_id AS sessionID, workspace_id AS workspaceID, path, branch,
+           base_ref AS baseRef, pushed, pr_url AS prUrl, created_at AS createdAt
+    FROM isolated_sessions
+  `
+  const listIsolatedSessionsStatement = db.prepare(`${isolatedSessionColumns} ORDER BY created_at ASC`)
+  const listIsolatedSessionsByWorkspaceStatement = db.prepare(
+    `${isolatedSessionColumns} WHERE workspace_id = ? ORDER BY created_at ASC`,
+  )
+  const getIsolatedSessionStatement = db.prepare(`${isolatedSessionColumns} WHERE session_id = ?`)
+  const createIsolatedSessionStatement = db.prepare(`
+    INSERT INTO isolated_sessions (session_id, workspace_id, path, branch, base_ref, pushed, pr_url, created_at)
+    VALUES (@sessionID, @workspaceID, @path, @branch, @baseRef, @pushed, @prUrl, @createdAt)
+  `)
+  const updateIsolatedSessionStatement = db.prepare(`
+    UPDATE isolated_sessions
+    SET pushed = COALESCE(@pushed, pushed), pr_url = COALESCE(@prUrl, pr_url)
+    WHERE session_id = @sessionID
+  `)
+  const removeIsolatedSessionStatement = db.prepare("DELETE FROM isolated_sessions WHERE session_id = ?")
+
+  /**
+   * SQLite has no boolean type; rows come back with `pushed` as 0/1. The
+   * queries above alias the columns, so normalize here.
+   */
+  function normalizeIsolatedSession(row: Record<string, unknown>): IsolatedSessionRecord {
+    return { ...(row as unknown as IsolatedSessionRecord), pushed: row.pushed === 1 }
+  }
+
   return {
     create(record) {
       createStatement.run(record)
@@ -119,6 +180,29 @@ export function createSqliteStore(file: string): Store {
     removeWorkspace(id) {
       removeWorkspaceStatement.run(id)
     },
+    listIsolatedSessions(workspaceID) {
+      const rows = workspaceID
+        ? listIsolatedSessionsByWorkspaceStatement.all(workspaceID)
+        : listIsolatedSessionsStatement.all()
+      return (rows as Record<string, unknown>[]).map(normalizeIsolatedSession)
+    },
+    getIsolatedSession(sessionID) {
+      const row = getIsolatedSessionStatement.get(sessionID) as Record<string, unknown> | undefined
+      return row ? normalizeIsolatedSession(row) : null
+    },
+    createIsolatedSession(record) {
+      createIsolatedSessionStatement.run({ ...record, pushed: record.pushed ? 1 : 0 })
+    },
+    updateIsolatedSession(sessionID, patch) {
+      updateIsolatedSessionStatement.run({
+        sessionID,
+        pushed: patch.pushed === undefined ? null : patch.pushed ? 1 : 0,
+        prUrl: patch.prUrl === undefined ? null : patch.prUrl,
+      })
+    },
+    removeIsolatedSession(sessionID) {
+      removeIsolatedSessionStatement.run(sessionID)
+    },
     close() {
       db.close()
     },
@@ -128,6 +212,7 @@ export function createSqliteStore(file: string): Store {
 export function createMemoryStore(): Store {
   const records = new Map<string, DeviceRecord>()
   const workspaces = new Map<string, WorkspaceRecord>()
+  const isolatedSessions = new Map<string, IsolatedSessionRecord>()
   return {
     create(record) {
       records.set(record.id, record)
@@ -159,6 +244,28 @@ export function createMemoryStore(): Store {
     },
     removeWorkspace(id) {
       workspaces.delete(id)
+    },
+    listIsolatedSessions(workspaceID) {
+      const values = [...isolatedSessions.values()].sort((a, b) => a.createdAt - b.createdAt)
+      return workspaceID ? values.filter((record) => record.workspaceID === workspaceID) : values
+    },
+    getIsolatedSession(sessionID) {
+      return isolatedSessions.get(sessionID) ?? null
+    },
+    createIsolatedSession(record) {
+      isolatedSessions.set(record.sessionID, record)
+    },
+    updateIsolatedSession(sessionID, patch) {
+      const record = isolatedSessions.get(sessionID)
+      if (!record) return
+      isolatedSessions.set(sessionID, {
+        ...record,
+        pushed: patch.pushed ?? record.pushed,
+        prUrl: patch.prUrl === undefined ? record.prUrl : patch.prUrl,
+      })
+    },
+    removeIsolatedSession(sessionID) {
+      isolatedSessions.delete(sessionID)
     },
     close() {},
   }

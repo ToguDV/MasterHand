@@ -62,9 +62,41 @@ export interface SessionModel {
   variant?: string
 }
 
+/**
+ * MasterHand metadata for a session running in its own git worktree
+ * (isolated mode). Added by the BFF; opencode itself knows nothing about it.
+ */
+export interface SessionIsolation {
+  isolated: true
+  /** Worktree directory the session runs in (its opencode `directory`). */
+  worktreePath: string
+  /** Branch checked out in the worktree (unique per worktree). */
+  branch: string
+  /** Branch/commit the worktree was created from. */
+  baseRef: string
+  pushed?: boolean
+  prUrl?: string | null
+}
+
 export interface Session extends OpenCodeSession {
   agent?: string
   model?: SessionModel
+  isolation?: SessionIsolation
+}
+
+export interface CreateSessionInput {
+  /** Run the session in its own git worktree instead of the workspace folder. */
+  isolated?: boolean
+}
+
+export interface FinishSessionResult {
+  committed: boolean
+  pushed: boolean
+  prUrl: string | null
+  branch: string
+  path: string
+  /** Push failure detail, when the branch could not be pushed. */
+  error: string | null
 }
 
 export interface DeviceRecord {

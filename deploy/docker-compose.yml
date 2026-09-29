@@ -15,6 +15,8 @@ services:
       WEB_DIST: apps/web/dist
       # Every workspace is a subfolder created here (same path opencode sees).
       WORKSPACES_ROOT: /workspace
+      # Per-session git worktrees; inside the shared mount so opencode sees them.
+      WORKTREES_ROOT: /workspace/.worktrees
     volumes:
       - masterhand_data:/data
       # Shared with opencode: the BFF creates each workspace subfolder here.

@@ -5,6 +5,7 @@ import { createApp } from "../src/app.js"
 import type { Config } from "../src/config.js"
 import { createEventHub, type EventHub } from "../src/events.js"
 import { createMemoryStore, type DeviceRecord, type Store } from "../src/store.js"
+import type { WorktreeManager } from "../src/worktrees.js"
 
 export async function waitFor(predicate: () => boolean, timeoutMs = 8000, intervalMs = 25): Promise<void> {
   const started = Date.now()
@@ -100,8 +101,52 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     webDist: null,
     allowedOrigins: [],
     workspacesRoot: "/tmp/masterhand-workspaces",
+    worktreesRoot: "/tmp/masterhand-worktrees",
+    gitUserName: "MasterHand Tests",
+    gitUserEmail: "tests@masterhand.local",
     ...overrides,
   }
+}
+
+/** In-memory `git` stand-in: records calls and answers like a clean repo. */
+export interface FakeWorktrees extends WorktreeManager {
+  calls: string[]
+  branches: Set<string>
+}
+
+export function createFakeWorktreeManager(overrides: Partial<WorktreeManager> = {}): FakeWorktrees {
+  const calls: string[] = []
+  const branches = new Set<string>()
+  const manager: FakeWorktrees = {
+    calls,
+    branches,
+    isGitRepo: () => true,
+    ensureRepo: (path) => {
+      calls.push(`ensure:${path}`)
+    },
+    headBranch: () => "main",
+    create: (repo, path, branch) => {
+      calls.push(`create:${repo}:${path}:${branch}`)
+      branches.add(branch)
+    },
+    remove: (repo, path, branch) => {
+      calls.push(`remove:${repo}:${path}:${branch}`)
+      branches.delete(branch)
+    },
+    list: () => [],
+    commitAll: (path) => {
+      calls.push(`commit:${path}`)
+      return true
+    },
+    hasRemote: () => false,
+    remoteUrl: () => null,
+    push: (path, branch) => {
+      calls.push(`push:${path}:${branch}`)
+    },
+    pullRequest: () => null,
+    ...overrides,
+  }
+  return manager
 }
 
 export interface TestApp {
@@ -117,6 +162,8 @@ export async function startTestApp(
     config?: Partial<Config>
     createDir?: (path: string) => void
     removeDir?: (path: string) => void
+    worktrees?: WorktreeManager
+    fetchImpl?: typeof fetch
   } = {},
 ): Promise<TestApp> {
   const config = testConfig(options.config)
@@ -133,6 +180,8 @@ export async function startTestApp(
     hub,
     createDir: options.createDir ?? (() => {}),
     removeDir: options.removeDir ?? (() => {}),
+    worktrees: options.worktrees ?? createFakeWorktreeManager(),
+    fetchImpl: options.fetchImpl,
   })
   const server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" })
   await new Promise<void>((resolve) => server.once("listening", resolve))

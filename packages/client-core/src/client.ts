@@ -2,9 +2,11 @@ import type {
   AgentInfo,
   BffStatus,
   Config,
+  CreateSessionInput,
   CreateWorkspaceInput,
   DeviceLoginResponse,
   DeviceRecord,
+  FinishSessionResult,
   MessageWithPartsResponse,
   Permission,
   PermissionResponse,
@@ -48,9 +50,19 @@ export interface Client {
     revokeDevice(id: string): Promise<void>
   }
   api: {
-    listSessions(directory?: string | null): Promise<Session[]>
-    createSession(directory?: string | null): Promise<Session>
-    deleteSession(id: string, directory?: string | null): Promise<boolean>
+    /**
+     * Workspace-scoped session operations. The BFF aggregates the workspace
+     * folder and every isolated worktree, annotating each session with its
+     * `isolation` (branch/worktree path) when it runs isolated.
+     */
+    sessions: {
+      list(workspaceID: string): Promise<Session[]>
+      create(workspaceID: string, input?: CreateSessionInput): Promise<Session>
+      remove(workspaceID: string, sessionID: string, directory?: string | null): Promise<void>
+      finish(sessionID: string): Promise<FinishSessionResult>
+      /** Directories that may hold sessions for the workspace (base + worktrees). */
+      directories(workspaceID: string): Promise<string[]>
+    }
     abortSession(id: string, directory?: string | null): Promise<boolean>
     messages(id: string, directory?: string | null): Promise<MessageWithPartsResponse[]>
     promptAsync(id: string, body: PromptBody, directory?: string | null): Promise<void>
@@ -136,10 +148,33 @@ export function createClient(options: ClientOptions = {}): Client {
       revokeDevice: (id) => request<void>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
     },
     api: {
-      listSessions: (directory) => opencode<Session[]>("/session", undefined, directory),
-      createSession: (directory) => opencode<Session>("/session", { method: "POST", body: "{}" }, directory),
-      deleteSession: (id, directory) =>
-        opencode<boolean>(`/session/${id}`, { method: "DELETE" }, directory),
+      sessions: {
+        list: (workspaceID) =>
+          request<{ sessions: Session[] }>(
+            `/api/workspaces/${encodeURIComponent(workspaceID)}/sessions`,
+          ).then((response) => response.sessions),
+        create: (workspaceID, input) =>
+          request<{ session: Session }>(`/api/workspaces/${encodeURIComponent(workspaceID)}/sessions`, {
+            method: "POST",
+            body: JSON.stringify(input ?? {}),
+          }).then((response) => response.session),
+        remove: (workspaceID, sessionID, directory) =>
+          request<void>(
+            `/api/workspaces/${encodeURIComponent(workspaceID)}/sessions/${encodeURIComponent(sessionID)}${
+              directory ? `?directory=${encodeURIComponent(directory)}` : ""
+            }`,
+            { method: "DELETE" },
+          ),
+        finish: (sessionID) =>
+          request<FinishSessionResult>(
+            `/api/isolated-sessions/${encodeURIComponent(sessionID)}/finish`,
+            { method: "POST" },
+          ),
+        directories: (workspaceID) =>
+          request<{ directories: string[] }>(
+            `/api/workspaces/${encodeURIComponent(workspaceID)}/directories`,
+          ).then((response) => response.directories),
+      },
       abortSession: (id, directory) =>
         opencode<boolean>(`/session/${id}/abort`, { method: "POST" }, directory),
       messages: (id, directory) => opencode<MessageWithPartsResponse[]>(`/session/${id}/message`, undefined, directory),

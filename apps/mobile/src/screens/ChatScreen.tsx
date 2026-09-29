@@ -1,6 +1,14 @@
-import { useRef } from "react"
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native"
-import { sessionUsage, useMessages, type Client, type MessageWithParts } from "@masterhand/client-core"
+import { useRef, useState } from "react"
+import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native"
+import { useQueryClient } from "@tanstack/react-query"
+import {
+  sessionUsage,
+  useMessages,
+  type Client,
+  type FinishSessionResult,
+  type MessageWithParts,
+  type SessionIsolation,
+} from "@masterhand/client-core"
 import { Composer } from "../components/Composer"
 import { MessageBubble } from "../components/MessageBubble"
 import { Screen } from "../components/Screen"
@@ -13,6 +21,7 @@ export function ChatScreen({
   busy,
   connected,
   directory,
+  isolation,
   autoAccept,
   onToggleAutoAccept,
   onOpenSession,
@@ -25,16 +34,36 @@ export function ChatScreen({
   busy: boolean
   connected: boolean
   directory?: string | null
+  isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
   onOpenSession?: (id: string) => void
   parentSessionID?: string | null
   onBack: () => void
 }) {
+  const queryClient = useQueryClient()
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
   const listRef = useRef<FlatList<MessageWithParts>>(null)
+  const [finishing, setFinishing] = useState(false)
+  const [finishResult, setFinishResult] = useState<FinishSessionResult | null>(null)
+  const [finishError, setFinishError] = useState<string | null>(null)
   const messages = messagesQuery.data ?? []
   const usage = sessionUsage(messages)
+
+  async function finish() {
+    setFinishing(true)
+    setFinishError(null)
+    try {
+      const result = await client.api.sessions.finish(sessionID)
+      setFinishResult(result)
+      if (result.error) setFinishError(result.error)
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] })
+    } catch {
+      setFinishError("Could not finish the session")
+    } finally {
+      setFinishing(false)
+    }
+  }
 
   return (
     <Screen>
@@ -70,6 +99,43 @@ export function ChatScreen({
           Session · ${usage.cost.toFixed(4)}
           {usage.tokens > 0 ? ` · ${usage.tokens} tok` : ""}
         </Text>
+      ) : null}
+
+      {isolation ? (
+        <View style={styles.isolationBar}>
+          <View style={styles.isolationInfo}>
+            <Text style={styles.isolationLabel}>Isolated</Text>
+            <Text style={styles.branch} numberOfLines={1}>
+              {isolation.branch}
+            </Text>
+          </View>
+          {isolation.prUrl ? (
+            <Pressable onPress={() => void Linking.openURL(isolation.prUrl!)}>
+              <Text style={styles.link}>PR ↗</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.finishButton, finishing && styles.disabled]}
+            onPress={() => void finish()}
+            disabled={finishing}
+          >
+            <Text style={styles.finishText}>{finishing ? "Finishing…" : "Finish & PR"}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {finishResult || finishError ? (
+        <View style={styles.finishStatus}>
+          <Text style={styles.finishStatusText}>
+            {finishResult ? (finishResult.committed ? "Changes committed." : "No changes to commit.") : ""}
+            {finishResult?.pushed ? " Branch pushed." : ""}
+          </Text>
+          {finishResult?.prUrl ? (
+            <Pressable onPress={() => void Linking.openURL(finishResult.prUrl!)}>
+              <Text style={styles.link}>Open pull request ↗</Text>
+            </Pressable>
+          ) : null}
+          {finishError ? <Text style={styles.finishError}>{finishError}</Text> : null}
+        </View>
       ) : null}
 
       <Composer
@@ -141,6 +207,69 @@ const styles = StyleSheet.create({
     textAlign: "right",
     paddingHorizontal: 14,
     paddingTop: 8,
+  },
+  isolationBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  isolationInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  isolationLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    textTransform: "uppercase",
+    fontWeight: "700",
+  },
+  branch: {
+    color: "#a5b4fc",
+    fontSize: 11,
+    fontFamily: "monospace",
+  },
+  finishButton: {
+    backgroundColor: "rgba(99, 102, 241, 0.15)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accentMuted,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  finishText: {
+    color: "#a5b4fc",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  finishStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 6,
+  },
+  finishStatusText: {
+    color: colors.muted,
+    fontSize: 11,
+  },
+  finishError: {
+    color: colors.danger,
+    fontSize: 11,
+  },
+  link: {
+    color: "#a5b4fc",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  disabled: {
+    opacity: 0.5,
   },
   floatingWrap: {
     position: "absolute",
