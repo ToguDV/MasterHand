@@ -74,6 +74,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 3. The BFF keeps a permanent SSE connection to opencode's `GET /global/event` (all projects; unwraps the `{ directory, project, payload }` envelope and drops `sync` events) and re-emits it on the BFF's `GET /api/events`.
 4. The client listens for `message.part.updated` (`{ part, delta? }`) and renders live streaming.
 5. When the turn ends, opencode emits `session.idle` (`{ sessionID }`).
+6. Each composer remembers the agent, model and effort (`variant`) chosen **per session**, stored client-side (`localStorage` on web, SecureStore on mobile) and restored when the session is reopened; new sessions keep falling back to the last used model.
 
 ### 4.2 Permission approvals
 
