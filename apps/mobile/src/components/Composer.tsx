@@ -16,6 +16,7 @@ import {
   type Client,
 } from "@masterhand/client-core"
 import { ChoiceModal, type ChoiceOption } from "./ChoiceModal"
+import { loadSessionPreferences, saveSessionPreferences } from "../storage"
 import { colors } from "../theme"
 
 type OpenPicker = "agent" | "model" | "effort" | null
@@ -57,23 +58,61 @@ export function Composer({
   const [error, setError] = useState<string | null>(null)
   const [picker, setPicker] = useState<OpenPicker>(null)
   const modelTouched = useRef(false)
+  const loaded = useRef(false)
 
   const variants = useMemo(
     () => modelOptions.find((option) => option.value === model)?.variants ?? [],
     [model, modelOptions],
   )
 
+  // Per-session selections: restore from storage when the session changes, then
+  // write back so reopening the session brings back agent, model and effort.
   useEffect(() => {
-    if (!agent && agents[0]) setAgent(agents[0].name)
+    let active = true
+    loaded.current = false
+    void loadSessionPreferences(sessionID).then((preferences) => {
+      if (!active) return
+      if (preferences.agent) setAgent(preferences.agent)
+      if (preferences.model) {
+        modelTouched.current = true
+        setModel(preferences.model)
+      }
+      if (preferences.variant) setVariant(preferences.variant)
+      loaded.current = true
+    })
+    return () => {
+      active = false
+    }
+  }, [sessionID])
+
+  useEffect(() => {
+    const fallback = agents[0]
+    if (!fallback) return
+    if (!agent || !agents.some((item) => item.name === agent)) setAgent(fallback.name)
   }, [agent, agents])
 
   useEffect(() => {
-    if (!modelTouched.current) setModel(defaultModel)
+    if (modelTouched.current) return
+    setModel(defaultModel)
   }, [defaultModel])
 
   useEffect(() => {
+    if (modelOptions.length === 0 || !model) return
+    if (!modelOptions.some((option) => option.value === model)) {
+      modelTouched.current = false
+      setModel(defaultModel)
+    }
+  }, [model, modelOptions, defaultModel])
+
+  useEffect(() => {
+    if (!modelOptions.some((option) => option.value === model)) return
     if (variant && !variants.includes(variant)) setVariant("")
-  }, [variant, variants])
+  }, [model, modelOptions, variant, variants])
+
+  useEffect(() => {
+    if (!loaded.current) return
+    void saveSessionPreferences(sessionID, { agent, model, variant })
+  }, [sessionID, agent, model, variant])
 
   async function send() {
     const trimmed = text.trim()

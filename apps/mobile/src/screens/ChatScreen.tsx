@@ -139,6 +139,7 @@ export function ChatScreen({
       ) : null}
 
       <Composer
+        key={sessionID}
         client={client}
         sessionID={sessionID}
         busy={busy}

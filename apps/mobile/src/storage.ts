@@ -5,11 +5,18 @@ export interface StoredDevice {
   name: string
 }
 
+export interface SessionPreferences {
+  agent: string
+  model: string
+  variant: string
+}
+
 const SERVER_URL_KEY = "masterhand.serverUrl"
 const TOKEN_KEY = "masterhand.token"
 const DEVICE_KEY = "masterhand.device"
 const WORKSPACE_KEY = "masterhand.workspaceID"
 const AUTO_ACCEPT_KEY = "masterhand.autoAcceptSessions"
+const PREFERENCES_KEY = "masterhand.sessionPreferences"
 
 export function loadServerUrl(): Promise<string | null> {
   return SecureStore.getItemAsync(SERVER_URL_KEY)
@@ -74,4 +81,33 @@ export async function loadAutoAcceptSessions(): Promise<string[]> {
 
 export function saveAutoAcceptSessions(ids: string[]): Promise<void> {
   return SecureStore.setItemAsync(AUTO_ACCEPT_KEY, JSON.stringify(ids))
+}
+
+export async function loadSessionPreferences(sessionID: string): Promise<Partial<SessionPreferences>> {
+  const raw = await SecureStore.getItemAsync(PREFERENCES_KEY)
+  if (!raw) return {}
+  try {
+    const map = JSON.parse(raw) as Record<string, Partial<SessionPreferences>>
+    const value = map[sessionID]
+    if (!value || typeof value !== "object") return {}
+    return {
+      ...(typeof value.agent === "string" ? { agent: value.agent } : {}),
+      ...(typeof value.model === "string" ? { model: value.model } : {}),
+      ...(typeof value.variant === "string" ? { variant: value.variant } : {}),
+    }
+  } catch {
+    return {}
+  }
+}
+
+export async function saveSessionPreferences(sessionID: string, preferences: SessionPreferences): Promise<void> {
+  let map: Record<string, SessionPreferences> = {}
+  try {
+    const raw = await SecureStore.getItemAsync(PREFERENCES_KEY)
+    if (raw) map = JSON.parse(raw) as Record<string, SessionPreferences>
+  } catch {
+    map = {}
+  }
+  map[sessionID] = preferences
+  await SecureStore.setItemAsync(PREFERENCES_KEY, JSON.stringify(map))
 }

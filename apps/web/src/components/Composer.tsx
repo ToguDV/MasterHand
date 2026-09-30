@@ -16,6 +16,41 @@ import {
 import { client } from "../client"
 import { SearchSelect } from "./SearchSelect"
 
+const PREFERENCES_STORAGE_KEY = "masterhand.sessionPreferences"
+
+interface SessionPreferences {
+  agent: string
+  model: string
+  variant: string
+}
+
+function readPreferences(sessionID: string): Partial<SessionPreferences> {
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, Partial<SessionPreferences>>) : {}
+    const value = map[sessionID]
+    if (!value || typeof value !== "object") return {}
+    return {
+      ...(typeof value.agent === "string" ? { agent: value.agent } : {}),
+      ...(typeof value.model === "string" ? { model: value.model } : {}),
+      ...(typeof value.variant === "string" ? { variant: value.variant } : {}),
+    }
+  } catch {
+    return {}
+  }
+}
+
+function writePreferences(sessionID: string, preferences: SessionPreferences): void {
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, SessionPreferences>) : {}
+    map[sessionID] = preferences
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // storage may be unavailable (private mode)
+  }
+}
+
 export function Composer({
   sessionID,
   busy,
@@ -45,13 +80,16 @@ export function Composer({
     return defaultModelValue(configQuery.data?.model, providersQuery.data?.default ?? {}, modelOptions, preferred)
   }, [configQuery.data, providersQuery.data, modelOptions, sessionsQuery.data, sessionID])
 
+  // Per-session selections: restored on mount (the view is keyed by session)
+  // and written back so switching sessions or reloading keeps them.
+  const stored = useMemo(() => readPreferences(sessionID), [sessionID])
   const [text, setText] = useState("")
-  const [agent, setAgent] = useState("")
-  const [model, setModel] = useState("")
-  const [variant, setVariant] = useState("")
+  const [agent, setAgent] = useState(stored.agent ?? "")
+  const [model, setModel] = useState(stored.model ?? "")
+  const [variant, setVariant] = useState(stored.variant ?? "")
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const modelTouched = useRef(false)
+  const modelTouched = useRef(Boolean(stored.model))
 
   const variants = useMemo(
     () => modelOptions.find((option) => option.value === model)?.variants ?? [],
@@ -59,16 +97,32 @@ export function Composer({
   )
 
   useEffect(() => {
-    if (!agent && agents[0]) setAgent(agents[0].name)
+    const fallback = agents[0]
+    if (!fallback) return
+    if (!agent || !agents.some((item) => item.name === agent)) setAgent(fallback.name)
   }, [agent, agents])
 
   useEffect(() => {
-    if (!modelTouched.current) setModel(defaultModel)
+    if (modelTouched.current) return
+    setModel(defaultModel)
   }, [defaultModel])
 
   useEffect(() => {
+    if (modelOptions.length === 0 || !model) return
+    if (!modelOptions.some((option) => option.value === model)) {
+      modelTouched.current = false
+      setModel(defaultModel)
+    }
+  }, [model, modelOptions, defaultModel])
+
+  useEffect(() => {
+    if (!modelOptions.some((option) => option.value === model)) return
     if (variant && !variants.includes(variant)) setVariant("")
-  }, [variant, variants])
+  }, [model, modelOptions, variant, variants])
+
+  useEffect(() => {
+    writePreferences(sessionID, { agent, model, variant })
+  }, [sessionID, agent, model, variant])
 
   async function send() {
     const trimmed = text.trim()
