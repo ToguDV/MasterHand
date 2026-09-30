@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
+import { getConnInfo } from "@hono/node-server/conninfo"
 import { Hono } from "hono"
+import type { Context } from "hono"
 import { streamSSE } from "hono/streaming"
 import {
   SESSION_COOKIE,
@@ -51,8 +53,14 @@ interface OpencodeSession {
   parentID?: string
 }
 
-function clientIp(header: string | undefined): string {
-  return header?.split(",")[0]?.trim() || "unknown"
+function clientIp(c: Context): string {
+  try {
+    // The socket peer address cannot be spoofed by the client, unlike
+    // X-Forwarded-For (which would let attackers rotate the rate-limit key).
+    return getConnInfo(c).remote.address ?? "unknown"
+  } catch {
+    return "unknown"
+  }
 }
 
 /** Fields MasterHand adds to an isolated session for the clients. */
@@ -119,7 +127,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/health", (c) => c.json({ ok: true }))
 
   app.post("/api/login", async (c) => {
-    const ip = clientIp(c.req.header("x-forwarded-for"))
+    const ip = clientIp(c)
     if (!loginLimiter.check(ip)) {
       return c.json({ error: "too_many_attempts" }, 429)
     }
@@ -144,7 +152,7 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   app.post("/api/devices", async (c) => {
-    const ip = clientIp(c.req.header("x-forwarded-for"))
+    const ip = clientIp(c)
     if (!loginLimiter.check(ip)) {
       return c.json({ error: "too_many_attempts" }, 429)
     }

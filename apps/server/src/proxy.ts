@@ -17,7 +17,11 @@ export function createOpencodeProxy(config: Config, fetchImpl: typeof fetch = fe
 
     let target: URL
     try {
-      target = new URL(path + requestUrl.search, config.opencodeUrl)
+      // Keep the upstream origin fixed: a path such as "//host/x" must never be
+      // interpreted as a protocol-relative URL (SSRF / credential leak).
+      target = new URL(config.opencodeUrl)
+      target.pathname = path.startsWith("/") ? path : `/${path}`
+      target.search = requestUrl.search
     } catch {
       return c.json({ error: "bad_upstream_url" }, 502)
     }
