@@ -401,6 +401,11 @@ export function invalidateOnReconnect(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: ["messages"] })
   void queryClient.invalidateQueries({ queryKey: queryKeys.statuses })
   void queryClient.invalidateQueries({ queryKey: ["directories"] })
+  // Catalogs recover on their own too: a page loaded while opencode rejected
+  // the BFF credentials would otherwise keep empty composer selectors until a
+  // manual reload.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.agents })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.models })
 }
 
 export interface UseEventStreamOptions {

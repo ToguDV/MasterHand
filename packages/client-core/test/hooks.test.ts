@@ -495,12 +495,14 @@ describe("createEventHandler", () => {
 })
 
 describe("invalidateOnReconnect", () => {
-  it("refreshes sessions, messages, statuses and directories", () => {
+  it("refreshes sessions, messages, statuses, directories and catalogs", () => {
     const { qc, invalidate } = makeQueryClient()
     invalidateOnReconnect(qc)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["messages"] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.statuses })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["directories"] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
   })
 })
