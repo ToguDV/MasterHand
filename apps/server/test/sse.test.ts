@@ -43,6 +43,16 @@ describe("parseSseStream", () => {
     expect(messages.map((message) => message.data)).toEqual(["hello", "world"])
   })
 
+  it("treats a CRLF pair split across chunks as a single line ending", async () => {
+    const messages = await collect(streamOf("data: one\r", "\ndata: two\n\n"))
+    expect(messages).toEqual([{ event: undefined, id: undefined, data: "one\ntwo" }])
+  })
+
+  it("treats a CR ending a chunk as a line ending", async () => {
+    const messages = await collect(streamOf("data: a\r", "data: b\n\n"))
+    expect(messages).toEqual([{ event: undefined, id: undefined, data: "a\nb" }])
+  })
+
   it("drops blocks without any field", async () => {
     const messages = await collect(streamOf("\n\n\ndata: ok\n\n"))
     expect(messages).toEqual([{ event: undefined, id: undefined, data: "ok" }])
