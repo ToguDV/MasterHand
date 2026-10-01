@@ -78,6 +78,11 @@ const conversations = new Map<string, SessionMessage[]>()
 const pendingPermissions = new Map<string, PendingPermission>()
 const activeRuns = new Set<string>()
 
+// E2E control: makes the mock unreachable (503) and drops its SSE clients, so
+// the BFF hub retries and tests can cover the upstream reconnection recovery.
+let offline = false
+const catalogRequests = { agent: 0, model: 0 }
+
 // Seed from the clock so ids never repeat across runs: the BFF reuses a
 // persistent SQLite DATA_DIR locally, so restarting at `ses_1` every time
 // collided with the `isolated_sessions.session_id` primary key.
@@ -128,14 +133,22 @@ function broadcast(type: string, data: unknown, directory?: string): void {
   for (const client of sseClients) client.write(frame)
 }
 
+/** Drops every SSE client (the BFF hub reconnects on its own). */
+function closeStreams(): void {
+  for (const client of sseClients) client.end()
+  sseClients.clear()
+}
+
 function openStream(res: ServerResponse): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
-  broadcast("server.connected", {})
+  // Register before emitting: `server.connected` is the first frame of the
+  // stream, and a client that misses it cannot reconcile (review F24-3).
   sseClients.add(res)
+  broadcast("server.connected", {})
   const keepalive = setInterval(() => res.write(": ping\n\n"), 25_000)
   res.on("close", () => {
     clearInterval(keepalive)
@@ -421,7 +434,23 @@ const server = createServer((req, res) => {
   const path = url.pathname
   const segments = path.split("/").filter(Boolean)
 
+  if (path === "/api/agent") catalogRequests.agent += 1
+  if (path === "/api/model") catalogRequests.model += 1
+
   void (async () => {
+    // E2E control routes: simulate opencode going away and coming back.
+    if (req.method === "POST" && (path === "/e2e/offline" || path === "/e2e/online")) {
+      offline = path === "/e2e/offline"
+      if (offline) closeStreams()
+      return empty(res, 204)
+    }
+    if (req.method === "GET" && path === "/e2e/state") {
+      return json(res, 200, { offline, ...catalogRequests })
+    }
+    if (offline && path.startsWith("/api/")) {
+      return json(res, 503, { error: "offline" })
+    }
+
     // Playwright's readiness probe for the mock itself.
     if (req.method === "GET" && path === "/global/health") return json(res, 200, { healthy: true, version: "2.0.6" })
     if (req.method === "GET" && path === "/api/info") {

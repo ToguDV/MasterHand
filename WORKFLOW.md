@@ -67,7 +67,7 @@ npm run e2e:browsers     # downloads the Chromium used by Playwright
 - Harness: `e2e/mock-opencode.ts` (fake `opencode serve`) + the real BFF serving the built web app, driven in a browser.
 - Ports: mock `4097`, BFF `8788` (no conflict with a local `npm run dev`).
 - Run: `npm run test:e2e`. Debug interactively: `npm run test:e2e -w @masterhand/e2e -- --ui`.
-- Coverage today: invalid login, the full flow login → new session → prompt → live stream → permission approval, workspaces, isolated sessions, model/effort/session preferences, subagents and session previews.
+- Coverage today: invalid login, the full flow login → new session → prompt → live stream → permission approval, workspaces, isolated sessions, model/effort/session preferences, subagents, session previews and upstream reconnection recovery.
 - Add one spec under `e2e/tests/` per user-facing flow.
 
 ## Finishing a task
