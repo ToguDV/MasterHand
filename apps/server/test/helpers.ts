@@ -111,6 +111,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     previewEnabled: true,
     previewOrigin: "127.0.0.1",
     previewPortRange: { min: 32900, max: 32999 },
+    previewReadinessMs: 25_000,
     cloudflaredBin: "cloudflared",
     ...overrides,
   }
@@ -170,6 +171,8 @@ export interface FakeTunnel {
   spawnImpl: typeof import("node:child_process").spawn
   /** Every spawned fake process, in order. */
   children: ChildProcess[]
+  /** Command and args of every spawn call. */
+  calls: { command: string; args: string[] }[]
   url: string
 }
 
@@ -190,7 +193,9 @@ export function createFakeTunnel(
   options: { fail?: boolean; silent?: boolean } = {},
 ): FakeTunnel {
   const children: ChildProcess[] = []
-  const spawnImpl = ((): ChildProcess => {
+  const calls: FakeTunnel["calls"] = []
+  const spawnImpl = ((command: string, args: string[]): ChildProcess => {
+    calls.push({ command, args })
     const child = new EventEmitter() as unknown as FakeChildProcess
     child.stdout = new PassThrough()
     child.stderr = new PassThrough()
@@ -216,7 +221,7 @@ export function createFakeTunnel(
     }
     return child as unknown as ChildProcess
   }) as unknown as typeof import("node:child_process").spawn
-  return { spawnImpl, children, url }
+  return { spawnImpl, children, calls, url }
 }
 
 export async function startTestApp(
@@ -231,7 +236,10 @@ export async function startTestApp(
       spawnImpl?: typeof import("node:child_process").spawn
       probe?: (host: string, port: number, timeoutMs: number) => Promise<boolean>
       available?: () => boolean
+      readinessImpl?: (url: string) => Promise<boolean>
       urlTimeoutMs?: number
+      readinessTimeoutMs?: number
+      readinessIntervalMs?: number
     }
   } = {},
 ): Promise<TestApp> {
@@ -250,8 +258,11 @@ export async function startTestApp(
       store,
       availableImpl: options.previewOptions?.available ?? (() => true),
       probe: options.previewOptions?.probe ?? (async () => true),
+      readinessImpl: options.previewOptions?.readinessImpl ?? (async () => true),
       spawnImpl: options.previewOptions?.spawnImpl,
       urlTimeoutMs: options.previewOptions?.urlTimeoutMs,
+      readinessTimeoutMs: options.previewOptions?.readinessTimeoutMs,
+      readinessIntervalMs: options.previewOptions?.readinessIntervalMs,
     })
   const app = createApp({
     config,

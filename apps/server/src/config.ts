@@ -36,6 +36,8 @@ export interface Config {
   previewOrigin: string
   /** Inclusive port pool reserved for session previews. */
   previewPortRange: PreviewPortRange
+  /** How long to wait for a fresh tunnel URL to become reachable (0 disables the check). */
+  previewReadinessMs: number
   /** `cloudflared` executable name or path. */
   cloudflaredBin: string
 }
@@ -125,6 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // development both processes run on the host.
     previewOrigin: env.PREVIEW_ORIGIN?.trim() || hostFromUrl(opencodeUrl, "127.0.0.1"),
     previewPortRange: portRangeFromEnv(env.PREVIEW_PORT_RANGE),
+    previewReadinessMs: intFromEnv(env.PREVIEW_READINESS_MS, 25_000),
     cloudflaredBin: env.CLOUDFLARED_BIN?.trim() || "cloudflared",
   }
 }

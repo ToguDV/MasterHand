@@ -1,19 +1,9 @@
 import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { ApiError, queryKeys, useBffStatus, usePreview, type PreviewStatus } from "@masterhand/client-core"
+import { previewErrorMessage, queryKeys, useBffStatus, usePreview, type PreviewStatus } from "@masterhand/client-core"
 import { client } from "../client"
 
 const STOPPED: PreviewStatus = { status: "stopped", url: null, port: null, error: null }
-
-/** Turns BFF error codes into something a user can act on. */
-function startErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.status === 409) return "The agent has not started a web server yet. Ask it to run the project, then try again."
-    if (error.status === 503) return "cloudflared is not available on the server."
-    return error.message
-  }
-  return "Could not start the preview"
-}
 
 export function PreviewPanel({ sessionID }: { sessionID: string }) {
   const queryClient = useQueryClient()
@@ -37,7 +27,7 @@ export function PreviewPanel({ sessionID }: { sessionID: string }) {
       const next = await client.api.startPreview(sessionID)
       queryClient.setQueryData(key, next)
     } catch (startError) {
-      setError(startErrorMessage(startError))
+      setError(previewErrorMessage(startError))
     } finally {
       setBusy(false)
     }

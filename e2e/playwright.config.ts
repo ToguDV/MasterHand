@@ -46,6 +46,9 @@ export default defineConfig({
         WORKSPACES_ROOT: "/tmp/masterhand-e2e-workspace",
         PREVIEW_ORIGIN: "127.0.0.1",
         PREVIEW_PORT_RANGE: `${MOCK_PREVIEW_PORT}-${MOCK_PREVIEW_PORT}`,
+        // The fake trycloudflare URL is not a real host, so the BFF must not
+        // wait for it to become reachable.
+        PREVIEW_READINESS_MS: "0",
         CLOUDFLARED_BIN: path.join(e2eDir, "fake-cloudflared.sh"),
       },
       url: `http://127.0.0.1:${BFF_PORT}/api/health`,

@@ -96,6 +96,7 @@ describe("loadConfig", () => {
     expect(config.previewEnabled).toBe(true)
     expect(config.previewOrigin).toBe("127.0.0.1")
     expect(config.previewPortRange).toEqual({ min: 3200, max: 3299 })
+    expect(config.previewReadinessMs).toBe(25_000)
     expect(config.cloudflaredBin).toBe("cloudflared")
 
     const docker = loadConfig(env({ OPENCODE_URL: "http://opencode:4096" }))
@@ -108,12 +109,14 @@ describe("loadConfig", () => {
         PREVIEW_ENABLED: "false",
         PREVIEW_ORIGIN: " 10.0.0.5 ",
         PREVIEW_PORT_RANGE: " 4000 - 4009 ",
+        PREVIEW_READINESS_MS: "0",
         CLOUDFLARED_BIN: "/usr/local/bin/cloudflared",
       }),
     )
     expect(config.previewEnabled).toBe(false)
     expect(config.previewOrigin).toBe("10.0.0.5")
     expect(config.previewPortRange).toEqual({ min: 4000, max: 4009 })
+    expect(config.previewReadinessMs).toBe(0)
     expect(config.cloudflaredBin).toBe("/usr/local/bin/cloudflared")
   })
 

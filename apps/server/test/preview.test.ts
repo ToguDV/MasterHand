@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
+import { createServer } from "node:http"
+import type { AddressInfo } from "node:net"
 import { createMemoryStore } from "../src/store.js"
-import { createPreviewManager, PreviewError, previewSystemPrompt } from "../src/preview.js"
+import { createPreviewManager, PreviewError, previewSystemPrompt, reachableOverHttp } from "../src/preview.js"
 import { createFakeTunnel, testConfig } from "./helpers.js"
 
 function setup(overrides: Parameters<typeof testConfig>[0] = {}, tunnel = createFakeTunnel()) {
@@ -12,6 +14,7 @@ function setup(overrides: Parameters<typeof testConfig>[0] = {}, tunnel = create
     spawnImpl: tunnel.spawnImpl,
     probe: async () => true,
     availableImpl: () => true,
+    readinessImpl: async () => true,
   })
   return { config, store, manager, tunnel }
 }
@@ -55,6 +58,16 @@ describe("preview tunnel lifecycle", () => {
     expect(manager.status("ses_1")).toMatchObject({ status: "running", error: null })
   })
 
+  it("rewrites the Host header so host-allowlisting dev servers accept the tunnel", async () => {
+    const { manager, tunnel } = setup()
+    await manager.start("ses_1")
+
+    const args = tunnel.calls[0]!.args
+    expect(args).toContain("--http-host-header")
+    expect(args[args.indexOf("--http-host-header") + 1]).toBe("localhost:32900")
+    expect(args).toContain("http://127.0.0.1:32900")
+  })
+
   it("refuses to start when the dev server is not listening", async () => {
     const config = testConfig()
     const store = createMemoryStore()
@@ -87,6 +100,7 @@ describe("preview tunnel lifecycle", () => {
       spawnImpl: tunnel.spawnImpl,
       probe: async () => true,
       availableImpl: () => true,
+      readinessImpl: async () => true,
       urlTimeoutMs: 20,
     })
 
@@ -94,12 +108,50 @@ describe("preview tunnel lifecycle", () => {
     expect(tunnel.children[0]!.signalCode).toBe("SIGTERM")
   })
 
+  it("fails when the public URL never becomes reachable", async () => {
+    const config = testConfig()
+    const store = createMemoryStore()
+    const tunnel = createFakeTunnel()
+    const manager = createPreviewManager({
+      config,
+      store,
+      spawnImpl: tunnel.spawnImpl,
+      probe: async () => true,
+      availableImpl: () => true,
+      readinessImpl: async () => false,
+      readinessTimeoutMs: 30,
+      readinessIntervalMs: 5,
+    })
+
+    await expect(manager.start("ses_1")).rejects.toMatchObject({ code: "preview_tunnel_unreachable" })
+    expect(tunnel.children[0]!.signalCode).toBe("SIGTERM")
+    expect(manager.status("ses_1").status).toBe("stopped")
+  })
+
+  it("skips the readiness check when it is disabled", async () => {
+    const config = testConfig({ previewReadinessMs: 0 })
+    const store = createMemoryStore()
+    const tunnel = createFakeTunnel()
+    const manager = createPreviewManager({
+      config,
+      store,
+      spawnImpl: tunnel.spawnImpl,
+      probe: async () => true,
+      availableImpl: () => true,
+      readinessImpl: async () => {
+        throw new Error("readiness must not be called")
+      },
+    })
+
+    await expect(manager.start("ses_1")).resolves.toMatchObject({ status: "running" })
+  })
+
   it("reports an error when a running tunnel dies", async () => {
     const { manager, tunnel } = setup()
     await manager.start("ses_1")
 
     tunnel.children[0]!.kill("SIGKILL")
-    expect(manager.status("ses_1")).toMatchObject({ status: "error", error: "preview_tunnel_exited" })
+    expect(manager.status("ses_1")).toMatchObject({ status: "error", error: "cloudflared exited (SIGKILL)" })
   })
 
   it("stops and forgets a preview", async () => {
@@ -162,6 +214,12 @@ describe("previewSystemPrompt", () => {
     expect(prompt).toContain("3200")
     expect(prompt).toContain("0.0.0.0")
   })
+
+  it("warns about host/origin allowlists", () => {
+    const prompt = previewSystemPrompt(3200)
+    expect(prompt).toContain(".trycloudflare.com")
+    expect(prompt).toContain("allowedHosts")
+  })
 })
 
 describe("PreviewError", () => {
@@ -169,5 +227,24 @@ describe("PreviewError", () => {
     const error = new PreviewError("preview_failed", "boom")
     expect(error.code).toBe("preview_failed")
     expect(error.message).toBe("preview_failed: boom")
+  })
+})
+
+describe("reachableOverHttp", () => {
+  it("accepts non-5xx answers and rejects 5xx, DNS and connection errors", async () => {
+    const server = createServer((req, res) => {
+      res.writeHead(req.url === "/ok" ? 200 : 530)
+      res.end("x")
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const port = (server.address() as AddressInfo).port
+    try {
+      expect(await reachableOverHttp(`http://127.0.0.1:${port}/ok`)).toBe(true)
+      expect(await reachableOverHttp(`http://127.0.0.1:${port}/down`)).toBe(false)
+      expect(await reachableOverHttp("http://127.0.0.1:1")).toBe(false)
+      expect(await reachableOverHttp("http://no-such-host.invalid")).toBe(false)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })

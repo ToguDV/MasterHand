@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "rea
 import { WebView } from "react-native-webview"
 import { useQueryClient } from "@tanstack/react-query"
 import {
-  ApiError,
+  previewErrorMessage,
   queryKeys,
   useBffStatus,
   usePreview,
@@ -13,15 +13,6 @@ import {
 import { colors } from "../theme"
 
 const STOPPED: PreviewStatus = { status: "stopped", url: null, port: null, error: null }
-
-function startErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.status === 409) return "The agent has not started a web server yet. Ask it to run the project first."
-    if (error.status === 503) return "cloudflared is not available on the server."
-    return error.message
-  }
-  return "Could not start the preview"
-}
 
 export function PreviewModal({
   client,
@@ -49,7 +40,7 @@ export function PreviewModal({
     try {
       queryClient.setQueryData(key, await client.api.startPreview(sessionID))
     } catch (startError) {
-      setError(startErrorMessage(startError))
+      setError(previewErrorMessage(startError))
     } finally {
       setBusy(false)
     }

@@ -55,7 +55,7 @@ Other rules:
 
 ## Session previews
 
-Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on first use (persisted in SQLite so it survives BFF restarts and the same dev server can be re-exposed). While previews are enabled, the proxy appends a `system` instruction to every prompt of that session telling the agent to bind any web server to `0.0.0.0:<port>`. The BFF then starts `cloudflared tunnel --no-autoupdate --url http://<PREVIEW_ORIGIN>:<port>` (a Cloudflare **quick tunnel**, see `deploy/server.Dockerfile`) and captures the random `https://<name>.trycloudflare.com` URL from its output.
+Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on first use (persisted in SQLite so it survives BFF restarts and the same dev server can be re-exposed). While previews are enabled, the proxy appends a `system` instruction to every prompt of that session telling the agent to bind any web server to `0.0.0.0:<port>`. The BFF then starts `cloudflared tunnel --no-autoupdate --url http://<PREVIEW_ORIGIN>:<port> --http-host-header localhost:<port>` (a Cloudflare **quick tunnel**, see `deploy/server.Dockerfile`) and captures the random `https://<name>.trycloudflare.com` URL from its output. The `--http-host-header` rewrite is required: framework dev servers reject the public hostname (Vite's `server.allowedHosts` returns `403 Blocked request`), and `localhost` is always allowed. Once the URL is captured, the BFF polls it for up to `PREVIEW_READINESS_MS` until it answers (the edge can take a few seconds to serve a new hostname), so `running` means the preview really loads.
 
 `PreviewStatus` shape: `{ status: "stopped" | "starting" | "running" | "error", url, port, error }`. The tunnel process lives in the BFF container; `PREVIEW_ORIGIN` is the host where the dev server listens as seen from there (`opencode` in Compose, `127.0.0.1` in native dev). Tunnels stop on `DELETE`, on session deletion and on BFF shutdown.
 
@@ -105,6 +105,7 @@ curl -X POST https://your-origin.example/api/devices \
 | `PREVIEW_ENABLED` | `true` | Enables session previews (quick tunnels). When `false`, the preview routes return `404` and prompts are untouched |
 | `PREVIEW_ORIGIN` | host of `OPENCODE_URL` | Host where the agent's dev server listens, as seen by the tunnel process (`opencode` in Compose, `127.0.0.1` in native dev) |
 | `PREVIEW_PORT_RANGE` | `3200-3299` | Inclusive port pool reserved per session. Falls back to the default when malformed or outside 1024–65535 |
+| `PREVIEW_READINESS_MS` | `25000` | How long the BFF waits for a fresh tunnel URL to answer before reporting `running` (quick tunnels announce the URL before the edge is ready). `0` disables the check |
 | `CLOUDFLARED_BIN` | `cloudflared` | `cloudflared` executable name or path (bundled in the server image) |
 | `GH_TOKEN` / `GITLAB_TOKEN` | — | Optional: credentials for `gh`/`glab` and git push inside the BFF container (see the deployment runbook) |
 | `WEB_DIST` | `apps/web/dist` | Web build served by the BFF |

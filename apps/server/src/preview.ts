@@ -43,13 +43,20 @@ export interface PreviewManagerDeps {
   probe?: (host: string, port: number, timeoutMs: number) => Promise<boolean>
   /** Overridable for tests: does the cloudflared binary exist? */
   availableImpl?: () => boolean
+  /** Overridable for tests: is the public URL reachable yet? */
+  readinessImpl?: (url: string) => Promise<boolean>
   /** How long to wait for cloudflared to announce its public URL. */
   urlTimeoutMs?: number
+  /** How long to wait for the tunnel's hostname to become reachable. */
+  readinessTimeoutMs?: number
+  readinessIntervalMs?: number
 }
 
 const URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/
 const PROBE_TIMEOUT_MS = 1500
 const URL_TIMEOUT_MS = 30_000
+const READINESS_INTERVAL_MS = 1_500
+const READINESS_REQUEST_TIMEOUT_MS = 5_000
 const KILL_GRACE_MS = 3000
 
 interface RunningPreview {
@@ -74,6 +81,21 @@ function probeTcp(host: string, port: number, timeoutMs: number): Promise<boolea
 }
 
 /**
+ * Quick tunnels announce their URL before the DNS record and the edge
+ * connection are ready, so a fresh URL can answer NXDOMAIN or a Cloudflare
+ * 530/1033 for a few seconds. Anything below 500 means the tunnel is up and
+ * the origin answered (its status is the app's business).
+ */
+export async function reachableOverHttp(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(READINESS_REQUEST_TIMEOUT_MS) })
+    return response.status < 500
+  } catch {
+    return false
+  }
+}
+
+/**
  * The instruction appended to every prompt of a session: a stable port is
  * reserved so the user can open a live preview of whatever the agent serves.
  */
@@ -84,6 +106,10 @@ export function previewSystemPrompt(port: number): string {
     `(for example: \`npm run dev -- --host 0.0.0.0 --port ${port}\` or \`python3 -m http.server ${port} --bind 0.0.0.0\`).`,
     `Never use a different port for a web server: the preview tunnel only forwards port ${port}.`,
     `If a process already listens on ${port}, reuse it instead of starting another one.`,
+    `The user opens the preview through a public tunnel (a random *.trycloudflare.com host), so if the dev server`,
+    `enforces a host/origin allowlist, configure it to accept tunnel hosts`,
+    `(for example Vite: \`server.allowedHosts: ['.trycloudflare.com']\` or \`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.trycloudflare.com\`;`,
+    `Next.js: add the tunnel pattern to \`allowedDevOrigins\`).`,
   ].join(" ")
 }
 
@@ -91,7 +117,10 @@ export function createPreviewManager(deps: PreviewManagerDeps): PreviewManager {
   const { config, store } = deps
   const spawnImpl = deps.spawnImpl ?? spawn
   const probe = deps.probe ?? probeTcp
+  const readiness = deps.readinessImpl ?? reachableOverHttp
   const urlTimeoutMs = deps.urlTimeoutMs ?? URL_TIMEOUT_MS
+  const readinessTimeoutMs = deps.readinessTimeoutMs ?? config.previewReadinessMs
+  const readinessIntervalMs = deps.readinessIntervalMs ?? READINESS_INTERVAL_MS
   const running = new Map<string, RunningPreview>()
   const starting = new Map<string, Promise<PreviewState>>()
   const failures = new Map<string, string>()
@@ -185,6 +214,18 @@ export function createPreviewManager(deps: PreviewManagerDeps): PreviewManager {
     })
   }
 
+  async function waitUntilReachable(url: string, failure: () => string | null): Promise<void> {
+    if (readinessTimeoutMs <= 0) return
+    const deadline = Date.now() + readinessTimeoutMs
+    while (Date.now() < deadline) {
+      const exited = failure()
+      if (exited) throw new PreviewError("preview_tunnel_exited", exited)
+      if (await readiness(url)) return
+      await new Promise((resolve) => setTimeout(resolve, readinessIntervalMs))
+    }
+    throw new PreviewError("preview_tunnel_unreachable", url)
+  }
+
   async function launch(sessionID: string): Promise<PreviewState> {
     const port = portFor(sessionID)
     const reachable = await probe(config.previewOrigin, port, PROBE_TIMEOUT_MS)
@@ -199,31 +240,54 @@ export function createPreviewManager(deps: PreviewManagerDeps): PreviewManager {
     try {
       child = spawnImpl(
         config.cloudflaredBin,
-        ["tunnel", "--no-autoupdate", "--url", `http://${config.previewOrigin}:${port}`],
+        [
+          "tunnel",
+          "--no-autoupdate",
+          "--url",
+          `http://${config.previewOrigin}:${port}`,
+          // Rewrite the Host header: dev servers reject the tunnel hostname
+          // (Vite's `server.allowedHosts` answers 403 otherwise), and localhost
+          // is always an allowed origin.
+          "--http-host-header",
+          `localhost:${port}`,
+        ],
         { stdio: ["ignore", "pipe", "pipe"] },
       )
     } catch (error) {
       throw new PreviewError("preview_spawn_failed", error instanceof Error ? error.message : "spawn failed")
     }
 
+    let failure: string | null = null
     child.once("error", (error) => {
-      failures.set(sessionID, error.message)
+      failure = error.message
+    })
+    // Keep cloudflared diagnostics flowing to the BFF logs for the whole
+    // lifetime: post-URL connection failures are otherwise invisible.
+    const logCloudflared = (chunk: Buffer): void => {
+      for (const line of chunk.toString().split("\n")) {
+        if (line.includes("ERR") || line.includes("WRN")) console.warn(`[preview] ${sessionID}: ${line.trim()}`)
+      }
+    }
+    child.stdout?.on("data", logCloudflared)
+    child.stderr?.on("data", logCloudflared)
+    // Persist the reason once the tunnel was live: status flips to `error`.
+    child.once("exit", (code, signal) => {
+      failure = failure ?? `cloudflared exited (${signal ?? code ?? "unknown"})`
+      if (running.get(sessionID)?.child === child) {
+        running.delete(sessionID)
+        failures.set(sessionID, failure)
+      }
     })
 
     let url: string
     try {
       url = await waitForUrl(child)
+      await waitUntilReachable(url, () => failure)
     } catch (error) {
+      console.warn(`[preview] ${sessionID}: ${error instanceof Error ? error.message : String(error)}`)
       kill(child)
       throw error
     }
-
-    child.once("exit", () => {
-      if (running.get(sessionID)?.child === child) {
-        running.delete(sessionID)
-        failures.set(sessionID, "preview_tunnel_exited")
-      }
-    })
 
     running.set(sessionID, { child, url, port })
     failures.delete(sessionID)
