@@ -27,7 +27,8 @@ export function PreviewPanel({ sessionID }: { sessionID: string }) {
   const preview = previewQuery.data ?? STOPPED
   const key = queryKeys.preview(sessionID)
 
-  if (!availability?.enabled || !availability.available) return null
+  if (!availability || !availability.enabled) return null
+  const unavailable = !availability.available
 
   async function start() {
     setBusy(true)
@@ -107,7 +108,7 @@ export function PreviewPanel({ sessionID }: { sessionID: string }) {
               >
                 Stop
               </button>
-            ) : (
+            ) : unavailable ? null : (
               <button
                 type="button"
                 onClick={() => void start()}
@@ -139,7 +140,12 @@ export function PreviewPanel({ sessionID }: { sessionID: string }) {
               />
             ) : (
               <div className="flex h-full items-center justify-center bg-zinc-950 p-6 text-center text-sm text-zinc-500">
-                {preview.status === "starting" ? (
+                {unavailable ? (
+                  <span>
+                    cloudflared is not available on the server. Install it, or run MasterHand with Docker (the image
+                    bundles it).
+                  </span>
+                ) : preview.status === "starting" ? (
                   "Starting the tunnel…"
                 ) : (
                   <span>

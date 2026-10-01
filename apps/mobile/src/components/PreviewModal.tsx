@@ -40,6 +40,7 @@ export function PreviewModal({
 
   const availability = statusQuery.data?.preview
   const preview = previewQuery.data ?? STOPPED
+  const unavailable = availability ? !availability.available : false
   const key = queryKeys.preview(sessionID)
 
   async function start() {
@@ -80,7 +81,7 @@ export function PreviewModal({
             <Pressable style={styles.button} onPress={() => void stop()}>
               <Text style={styles.buttonText}>Stop</Text>
             </Pressable>
-          ) : (
+          ) : unavailable ? null : (
             <Pressable style={[styles.button, styles.primary]} onPress={() => void start()}>
               <Text style={[styles.buttonText, styles.primaryText]}>Start</Text>
             </Pressable>
@@ -97,11 +98,13 @@ export function PreviewModal({
         ) : (
           <View style={styles.placeholder}>
             <Text style={styles.placeholderText}>
-              {preview.status === "starting"
-                ? "Starting the tunnel…"
-                : `Ask the agent to start the web server on port ${
-                    preview.port ?? availability?.portRange.min ?? ""
-                  }, then press Start.`}
+              {unavailable
+                ? "cloudflared is not available on the server. Install it, or run MasterHand with Docker (the image bundles it)."
+                : preview.status === "starting"
+                  ? "Starting the tunnel…"
+                  : `Ask the agent to start the web server on port ${
+                      preview.port ?? availability?.portRange.min ?? ""
+                    }, then press Start.`}
             </Text>
           </View>
         )}

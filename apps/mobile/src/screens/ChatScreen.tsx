@@ -78,7 +78,7 @@ export function ChatScreen({
         <Text style={styles.title} numberOfLines={1}>
           {title || "Session"}
         </Text>
-        {statusQuery.data?.preview?.enabled && statusQuery.data.preview.available ? (
+        {statusQuery.data?.preview?.enabled ? (
           <Pressable style={styles.previewButton} onPress={() => setPreviewOpen(true)}>
             <Text style={styles.previewButtonText}>Preview</Text>
           </Pressable>
