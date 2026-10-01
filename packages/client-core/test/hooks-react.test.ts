@@ -12,6 +12,7 @@ import {
   useConfig,
   useEventStream,
   useMessages,
+  usePreview,
   useProviders,
   useSessionDirectories,
   useSessions,
@@ -41,6 +42,7 @@ function makeClient(stream = makeEventStream()) {
     agents: vi.fn(async () => []),
     providers: vi.fn(async () => ({ providers: [], default: {} })),
     config: vi.fn(async () => ({ model: "x/y" })),
+    preview: vi.fn(async () => ({ status: "stopped", url: null, port: null, error: null })),
   }
   const eventStream = vi.fn((_options: Parameters<Client["eventStream"]>[0]) => stream)
   const workspaces = { list: vi.fn(async () => []) }
@@ -147,6 +149,19 @@ describe("query hooks", () => {
     expect(api.agents).toHaveBeenCalledTimes(1)
     expect(api.providers).toHaveBeenCalledTimes(1)
     expect(api.config).toHaveBeenCalledTimes(1)
+  })
+
+  it("usePreview stays disabled without a session and fetches with one", async () => {
+    const qc = newQueryClient()
+    const { client, api } = makeClient()
+
+    const disabled = renderHook(() => usePreview(client, null), { wrapper: wrapper(qc) })
+    expect(disabled.result.current.fetchStatus).toBe("idle")
+    expect(api.preview).not.toHaveBeenCalled()
+
+    const enabled = renderHook(() => usePreview(client, "ses_1"), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(enabled.result.current.isSuccess).toBe(true))
+    expect(api.preview).toHaveBeenCalledWith("ses_1")
   })
 })
 

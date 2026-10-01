@@ -29,6 +29,13 @@ export interface IsolatedSessionRecord {
   createdAt: number
 }
 
+/** Reserved preview port for a session (survives BFF restarts). */
+export interface PreviewPortRecord {
+  sessionID: string
+  port: number
+  createdAt: number
+}
+
 export interface Store {
   create(record: DeviceRecord): void
   get(id: string): DeviceRecord | null
@@ -45,6 +52,10 @@ export interface Store {
   createIsolatedSession(record: IsolatedSessionRecord): void
   updateIsolatedSession(sessionID: string, patch: { pushed?: boolean; prUrl?: string | null }): void
   removeIsolatedSession(sessionID: string): void
+  listPreviewPorts(): PreviewPortRecord[]
+  getPreviewPort(sessionID: string): number | null
+  assignPreviewPort(record: PreviewPortRecord): void
+  removePreviewPort(sessionID: string): void
   close(): void
 }
 
@@ -81,6 +92,13 @@ export function createSqliteStore(file: string): Store {
   `)
   // Push subscriptions belonged to the pre-re-architecture PWA plan.
   db.exec("DROP TABLE IF EXISTS push_subscriptions")
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS preview_ports (
+      session_id TEXT PRIMARY KEY,
+      port INTEGER NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
+    )
+  `)
 
   const createStatement = db.prepare(`
     INSERT INTO devices (id, name, created_at, last_used_at)
@@ -140,6 +158,15 @@ export function createSqliteStore(file: string): Store {
     WHERE session_id = @sessionID
   `)
   const removeIsolatedSessionStatement = db.prepare("DELETE FROM isolated_sessions WHERE session_id = ?")
+
+  const previewPortColumns = `SELECT session_id AS sessionID, port, created_at AS createdAt FROM preview_ports`
+  const listPreviewPortsStatement = db.prepare(`${previewPortColumns} ORDER BY created_at ASC`)
+  const getPreviewPortStatement = db.prepare(`${previewPortColumns} WHERE session_id = ?`)
+  const assignPreviewPortStatement = db.prepare(`
+    INSERT OR REPLACE INTO preview_ports (session_id, port, created_at)
+    VALUES (@sessionID, @port, @createdAt)
+  `)
+  const removePreviewPortStatement = db.prepare("DELETE FROM preview_ports WHERE session_id = ?")
 
   /**
    * SQLite has no boolean type; rows come back with `pushed` as 0/1. The
@@ -203,6 +230,19 @@ export function createSqliteStore(file: string): Store {
     removeIsolatedSession(sessionID) {
       removeIsolatedSessionStatement.run(sessionID)
     },
+    listPreviewPorts() {
+      return listPreviewPortsStatement.all() as PreviewPortRecord[]
+    },
+    getPreviewPort(sessionID) {
+      const row = getPreviewPortStatement.get(sessionID) as { port: number } | undefined
+      return row?.port ?? null
+    },
+    assignPreviewPort(record) {
+      assignPreviewPortStatement.run(record)
+    },
+    removePreviewPort(sessionID) {
+      removePreviewPortStatement.run(sessionID)
+    },
     close() {
       db.close()
     },
@@ -213,6 +253,7 @@ export function createMemoryStore(): Store {
   const records = new Map<string, DeviceRecord>()
   const workspaces = new Map<string, WorkspaceRecord>()
   const isolatedSessions = new Map<string, IsolatedSessionRecord>()
+  const previewPorts = new Map<string, PreviewPortRecord>()
   return {
     create(record) {
       records.set(record.id, record)
@@ -266,6 +307,18 @@ export function createMemoryStore(): Store {
     },
     removeIsolatedSession(sessionID) {
       isolatedSessions.delete(sessionID)
+    },
+    listPreviewPorts() {
+      return [...previewPorts.values()].sort((a, b) => a.createdAt - b.createdAt)
+    },
+    getPreviewPort(sessionID) {
+      return previewPorts.get(sessionID)?.port ?? null
+    },
+    assignPreviewPort(record) {
+      previewPorts.set(record.sessionID, record)
+    },
+    removePreviewPort(sessionID) {
+      previewPorts.delete(sessionID)
     },
     close() {},
   }

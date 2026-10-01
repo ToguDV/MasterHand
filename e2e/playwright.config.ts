@@ -43,6 +43,15 @@ export default defineConfig({
         COOKIE_SECURE: "false",
         DATA_DIR: "/tmp/masterhand-e2e",
         WORKSPACES_ROOT: "/tmp/masterhand-e2e-workspace",
+        PREVIEW_ORIGIN: "127.0.0.1",
+        // The mock's own port doubles as the session's dev server: the BFF's
+        // reachability probe only needs a listener, and this avoids a second
+        // hardcoded port (32950 was already taken on GitHub runners).
+        PREVIEW_PORT_RANGE: `${MOCK_PORT}-${MOCK_PORT}`,
+        // The fake trycloudflare URL is not a real host, so the BFF must not
+        // wait for it to become reachable.
+        PREVIEW_READINESS_MS: "0",
+        CLOUDFLARED_BIN: path.join(e2eDir, "fake-cloudflared.sh"),
       },
       url: `http://127.0.0.1:${BFF_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { login, startMockOpencode, startTestApp, type MockOpencode, type TestApp } from "./helpers.js"
+import { createFakeTunnel, login, startMockOpencode, startTestApp, type MockOpencode, type TestApp } from "./helpers.js"
 
 let app: TestApp | null = null
 let upstream: MockOpencode | null = null
@@ -67,7 +67,104 @@ describe("/api/status", () => {
     expect(await response.json()).toEqual({
       ok: true,
       opencode: { healthy: true, version: "1.2.3" },
+      preview: { enabled: true, available: true, portRange: { min: 32900, max: 32999 } },
     })
+  })
+
+  it("reports previews as disabled when configured off", async () => {
+    app = await startTestApp({ config: { previewEnabled: false } })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/status`, { headers: { cookie } })
+    const body = (await response.json()) as { preview: { enabled: boolean; available: boolean } }
+    expect(body.preview).toEqual({ enabled: false, available: false, portRange: { min: 32900, max: 32999 } })
+  })
+})
+
+describe("preview routes", () => {
+  it("starts, reports and stops a session preview", async () => {
+    const tunnel = createFakeTunnel()
+    app = await startTestApp({
+      previewOptions: { spawnImpl: tunnel.spawnImpl, probe: async () => true, available: () => true },
+    })
+    const cookie = await login(app.url)
+
+    const initial = await fetch(`${app.url}/api/sessions/ses_1/preview`, { headers: { cookie } })
+    expect(initial.status).toBe(200)
+    expect(await initial.json()).toEqual({
+      preview: { status: "stopped", url: null, port: null, error: null },
+    })
+
+    const started = await fetch(`${app.url}/api/sessions/ses_1/preview`, {
+      method: "POST",
+      headers: { cookie },
+    })
+    expect(started.status).toBe(200)
+    expect(await started.json()).toEqual({
+      preview: {
+        status: "running",
+        url: "https://fake-preview.trycloudflare.com",
+        port: 32900,
+        error: null,
+      },
+    })
+
+    const listed = await fetch(`${app.url}/api/sessions/ses_1/preview`, { headers: { cookie } })
+    expect(((await listed.json()) as { preview: { status: string } }).preview.status).toBe("running")
+
+    const stopped = await fetch(`${app.url}/api/sessions/ses_1/preview`, {
+      method: "DELETE",
+      headers: { cookie },
+    })
+    expect(stopped.status).toBe(200)
+    expect(tunnel.children[0]!.signalCode).toBe("SIGTERM")
+  })
+
+  it("returns 409 when the dev server is not listening", async () => {
+    app = await startTestApp({ previewOptions: { probe: async () => false, available: () => true } })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/sessions/ses_1/preview`, { method: "POST", headers: { cookie } })
+    expect(response.status).toBe(409)
+    expect(((await response.json()) as { error: string }).error).toBe("preview_not_running")
+  })
+
+  it("returns 503 when cloudflared is not installed", async () => {
+    app = await startTestApp({ previewOptions: { available: () => false } })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/sessions/ses_1/preview`, { method: "POST", headers: { cookie } })
+    expect(response.status).toBe(503)
+    expect(((await response.json()) as { error: string }).error).toBe("preview_unavailable")
+  })
+
+  it("returns 404 when previews are disabled", async () => {
+    app = await startTestApp({ config: { previewEnabled: false } })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/sessions/ses_1/preview`, { method: "POST", headers: { cookie } })
+    expect(response.status).toBe(404)
+  })
+
+  it("forgets the reserved port when a session is deleted", async () => {
+    upstream = await startMockOpencode()
+    app = await startTestApp({ config: { opencodeUrl: upstream.url } })
+    const cookie = await login(app.url)
+
+    await fetch(`${app.url}/api/oc/session/ses_55/prompt_async`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text: "hello" }] }),
+    })
+    expect(app.store.getPreviewPort("ses_55")).toBe(32900)
+
+    app.store.createWorkspace({ id: "ws", name: "ws", path: "/tmp/masterhand-workspaces/ws", createdAt: Date.now() })
+    const deleted = await fetch(`${app.url}/api/workspaces/ws/sessions/ses_55`, {
+      method: "DELETE",
+      headers: { cookie },
+    })
+    expect(deleted.status).toBe(200)
+    expect(app.store.getPreviewPort("ses_55")).toBeNull()
   })
 })
 

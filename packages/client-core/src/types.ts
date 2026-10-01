@@ -123,6 +123,30 @@ export interface BffStatus {
     healthy: boolean
     version?: string
   }
+  preview?: PreviewAvailability
+}
+
+export interface PreviewPortRange {
+  min: number
+  max: number
+}
+
+export interface PreviewAvailability {
+  enabled: boolean
+  available: boolean
+  portRange: PreviewPortRange
+}
+
+export type PreviewPhase = "stopped" | "starting" | "running" | "error"
+
+/** State of a session's Cloudflare quick-tunnel preview, owned by the BFF. */
+export interface PreviewStatus {
+  status: PreviewPhase
+  /** Public trycloudflare.com URL while the tunnel is running. */
+  url: string | null
+  /** Port reserved for the session's dev server (null until first used). */
+  port: number | null
+  error: string | null
 }
 
 export interface DeviceLoginResponse {

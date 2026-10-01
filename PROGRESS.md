@@ -2,14 +2,14 @@
 
 Project status: what is done, in progress, pending, and the changelog. Updated **when each task finishes** (see rules in `AGENTS.md`).
 
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 
 ## Overall status
 
 | Field | Value |
 |---|---|
 | Current phase | Phase 3 completed. Deployment artifacts verified ready to launch. Phase 4 (public release polish) deferred; Phase 5 (host deployment/hardening) intentionally out of scope |
-| Code | BFF (cookie + device tokens), web, Electron shell and React Native app; isolated sessions (git worktrees) with Finish & PR; 231 unit tests with an 80% coverage gate + 14 E2E green; Docker Compose stack re-verified (build, health, opencode auth) and smoke-tested; mobile bundle exported with Metro |
+| Code | BFF (cookie + device tokens), web, Electron shell and React Native app; isolated sessions (git worktrees) with Finish & PR; session previews (Cloudflare quick tunnels) in web, desktop and mobile; 262 unit tests with an 80% coverage gate + 18 E2E green; Docker Compose stack re-verified (build, health, opencode auth) and smoke-tested; mobile bundle exported with Metro |
 | Workflow | Git hooks (typecheck/unit on commit, full gate on push), Playwright E2E with a mocked opencode, GitHub Actions CI and PR template. See `WORKFLOW.md` |
 | Documentation | Full English baseline ✅; `docs/bff/api.md` and `docs/runbooks/deployment.md` updated to the multi-platform design |
 | Current blocker | None. Real-device verification (iOS/Android) and Electron packaging require a local GUI environment |
@@ -65,6 +65,16 @@ Project status: what is done, in progress, pending, and the changelog. Updated *
 - [x] Spanish code comments and user-facing strings translated to English
 - [ ] Manual verification on iOS/Android devices and Electron packaging (`electron-builder`) — requires a GUI environment
 
+## Post-MVP — Session previews — ✅ Completed
+
+- [x] BFF: fixed preview port per session (`preview_ports` table), configurable via `PREVIEW_PORT_RANGE` (plus `PREVIEW_ENABLED`, `PREVIEW_ORIGIN`, `CLOUDFLARED_BIN`)
+- [x] BFF: `cloudflared` quick-tunnel manager with explicit Start/Stop, TCP reachability probe, URL capture, and cleanup on session delete/workspace delete/shutdown
+- [x] BFF: per-prompt `system` injection of the reserved port (append semantics verified against opencode v1.18.34)
+- [x] `client-core`: `PreviewStatus` types, `preview`/`startPreview`/`stopPreview` client methods, `usePreview` hook
+- [x] Web/desktop preview panel (sandboxed iframe, Start/Stop, open in new tab) and mobile preview modal (`react-native-webview`)
+- [x] Deploy: `cloudflared` bundled in the server image; Compose publishes `PREVIEW_ORIGIN=opencode`; `.env.example` documents the public/ephemeral tradeoff
+- [x] Tests: unit coverage for the manager, proxy injection, config and store; E2E spec driven by a fake `cloudflared` binary
+
 ## Testing & workflow — ✅ Completed
 
 - [x] `WORKFLOW.md`: one feature per branch/PR, gates, squash merge to `main`
@@ -110,7 +120,7 @@ None blocking. Resolved: **npm workspaces**, session/device token TTL configurab
 - TOTP / two-factor authentication
 - Automated E2E suite (Playwright) against a mocked opencode in the repo
 - Terminal in the browser (`pty.*` events already exist in the API)
-- Full visual diffs and dev-server previews
+- Full visual diffs
 - Multi-run, session goals, scheduled tasks
 - Stricter agent sandbox (resource limits, restricted network)
 - Multi-user (only if the instance is ever shared)
@@ -148,3 +158,6 @@ None blocking. Resolved: **npm workspaces**, session/device token TTL configurab
 - **2026-09-30** — **Per-session composer selections (agent, model, effort).** The agent, model and effort (`variant`) chosen in the composer are now remembered **per session**, mirroring the auto-accept preference: stored client-side (`masterhand.sessionPreferences` in `localStorage` on web, SecureStore on mobile) and restored when the session is reopened or the app reloads. New sessions still fall back to the last used model, and stale stored values are validated against the available agents/models before being applied. Web's per-session view remounts on switch; mobile keys the `Composer` by session and loads asynchronously. `ARCHITECTURE.md` §4.1 updated. New E2E spec proves the selections survive a reload and stay scoped to their session.
 - **2026-09-30** — **Security fix: SSRF in the opencode proxy + login rate-limit bypass.** A pentest (`H-1`, `H-2`) found two exploitable issues. (1) The proxy built its upstream URL with `new URL(path, opencodeUrl)`, so a path like `/api/oc//host/x` was read as a protocol-relative URL and the BFF made authenticated (with `Authorization: Basic <OPENCODE_SERVER_PASSWORD>`) requests to an arbitrary host, leaking the opencode credential — it now keeps the upstream origin fixed and only replaces `pathname`. (2) The login/device rate limiter keyed on the leftmost `X-Forwarded-For` value, which the client controls, enabling brute force by header rotation — it now uses the real socket peer address via `getConnInfo`. Added regression tests (SSRF host pinning, XFF rotation still hits `429`).
 - **2026-09-30** — **Fix: flaky `isolated.spec.ts` on repeated local E2E runs.** The mock opencode seeded its id counter at 0 every run (`e2e/mock-opencode.ts`), while the BFF reuses a persistent `DATA_DIR` (`/tmp/masterhand-e2e`) locally, so the first isolated test recreated `ses_1` and hit `UNIQUE constraint failed: isolated_sessions.session_id` (a `500 isolation_failed` and a timeout waiting for the composer). The counter is now seeded from `Date.now()`, so session ids stay unique across runs regardless of reused state. Verified with three consecutive `test:e2e` runs sharing the same persistent `DATA_DIR`, all 17 E2E green.
+- **2026-10-01** — **Session previews via Cloudflare quick tunnels.** Any web project the agent runs can now be previewed from web, desktop and mobile without publishing ports. The BFF reserves a **fixed port per session** from the configurable `PREVIEW_PORT_RANGE` (persisted in a new `preview_ports` table, recycled when the pool drains) and appends a per-prompt `system` instruction telling the agent to bind its dev server to `0.0.0.0:<port>` (opencode merges `system` into the system prompt; verified against v1.18.34). `preview.ts` spawns `cloudflared tunnel --no-autoupdate --url http://<PREVIEW_ORIGIN>:<port>` on an explicit Start, probes the port over TCP first (`409 preview_not_running` when nothing listens), captures the random `https://*.trycloudflare.com` URL from its output and kills the process on Stop, session deletion, workspace deletion or shutdown. New routes `GET|POST|DELETE /api/sessions/:sessionID/preview` plus `preview: { enabled, available, portRange }` on `/api/status`; `PREVIEW_ENABLED`, `PREVIEW_ORIGIN`, `PREVIEW_PORT_RANGE` and `CLOUDFLARED_BIN` configure it. `client-core` gains `PreviewStatus`, the three client methods and `usePreview`. Web/desktop add a preview panel (sandboxed iframe, port badge, Open ↗, Start/Stop) and mobile a full-screen `react-native-webview` modal. The `masterhand` image bundles a pinned `cloudflared` (build arg `CLOUDFLARED_VERSION`) and Compose sets `PREVIEW_ORIGIN=opencode`, so the tunnel targets the dev server inside the opencode container over the internal network with outbound Internet only; `.env.example` documents that quick tunnels are public and ephemeral (testing only). Docs: `SPEC.md` FR-10 (out of the MVP out-of-scope list), `ARCHITECTURE.md` §4.8 + ADR-13/14 + risk row, `docs/bff/api.md` endpoints/env/prompt-injection note. Verified: 262 unit tests, coverage gate green, 18 E2E green (new `preview.spec.ts` driven by `e2e/fake-cloudflared.sh` and a fake dev-server listener in the mock), typecheck and build across all workspaces.
+- **2026-10-01** — **Fix: dev servers behind the preview tunnel returned `403`.** Vite (and other dev servers) reject requests whose `Host` is the random `*.trycloudflare.com` hostname (`server.allowedHosts`: *"Blocked request. This host is not allowed"*). The tunnel now starts with `--http-host-header localhost:<port>`, so the origin always sees an allowed host without touching the project's config, and the injected prompt also warns the agent to allow tunnel hosts when the framework checks origins (e.g. Vite `allowedHosts`, Next.js `allowedDevOrigins`). The preview toggle is now shown even when `cloudflared` is missing, with an explanatory message instead of silently disappearing. Also hardened the E2E mock (clean SIGTERM shutdown, non-fatal busy preview port) after an `EADDRINUSE` flake. Verified: 153 server unit tests, 18 E2E green across repeated runs, and a live quick tunnel serving the Vite app with `200`.
+- **2026-10-01** — **Fix: CI E2E failed on a busy preview port.** GitHub's runner already had `127.0.0.1:32950` in use, so the mock's dedicated fake dev-server listener hit `EADDRINUSE`, the BFF's reachability probe failed and `Start` returned `409` (`preview_not_running`). The E2E harness now reuses the mock's own port (`4097`) as the session's preview port (`PREVIEW_PORT_RANGE=4097-4097`), removing the second hardcoded port entirely, and the BFF only reports `running` after the tunnel URL answers (skipped in E2E with `PREVIEW_READINESS_MS=0`).

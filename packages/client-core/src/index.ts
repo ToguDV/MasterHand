@@ -1,6 +1,6 @@
 export * from "./types"
 export { ApiError, createClient, type Client, type ClientOptions } from "./client"
-export { opencodeErrorMessage } from "./errors"
+export { opencodeErrorMessage, previewErrorMessage } from "./errors"
 export { createEventStream, type EventStream, type EventStreamOptions } from "./events"
 export { parseSseStream, type SseMessage } from "./sse"
 export {
@@ -44,6 +44,7 @@ export {
   useConfig,
   useEventStream,
   useMessages,
+  usePreview,
   useProviders,
   useSessionDirectories,
   useSessionStatuses,

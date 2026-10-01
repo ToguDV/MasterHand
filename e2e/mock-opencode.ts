@@ -422,3 +422,12 @@ const server = createServer((req, res) => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`[mock-opencode] listening on http://127.0.0.1:${port}`)
 })
+
+function shutdown(): void {
+  server.close(() => process.exit(0))
+  // Never hang the teardown if a connection stays open.
+  setTimeout(() => process.exit(0), 1000).unref()
+}
+
+process.on("SIGTERM", shutdown)
+process.on("SIGINT", shutdown)

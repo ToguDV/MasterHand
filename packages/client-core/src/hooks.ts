@@ -18,6 +18,7 @@ export const queryKeys = {
   sessionsFor: (workspaceID?: string | null) => ["sessions", workspaceID ?? null] as const,
   /** Directories holding sessions for a workspace (base folder + worktrees). */
   directories: (workspaceID?: string | null) => ["directories", workspaceID ?? null] as const,
+  preview: (sessionID: string) => ["preview", sessionID] as const,
 }
 
 export function useBffStatus(client: Client, refetchInterval: number | false = false) {
@@ -93,6 +94,15 @@ export function useProviders(client: Client) {
 
 export function useConfig(client: Client) {
   return useQuery({ queryKey: queryKeys.config, queryFn: () => client.api.config(), staleTime: 5 * 60_000 })
+}
+
+export function usePreview(client: Client, sessionID: string | null, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.preview(sessionID ?? ""),
+    queryFn: () => client.api.preview(sessionID!),
+    enabled: enabled && Boolean(sessionID),
+    refetchInterval: (query) => (query.state.data?.status === "starting" ? 1500 : false),
+  })
 }
 
 export interface EventHandlerCallbacks {

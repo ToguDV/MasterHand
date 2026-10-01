@@ -1,9 +1,13 @@
 import { createServer } from "node:http"
+import { EventEmitter } from "node:events"
+import { PassThrough } from "node:stream"
 import type { AddressInfo } from "node:net"
+import type { ChildProcess } from "node:child_process"
 import { serve } from "@hono/node-server"
 import { createApp } from "../src/app.js"
 import type { Config } from "../src/config.js"
 import { createEventHub, type EventHub } from "../src/events.js"
+import { createPreviewManager, type PreviewManager } from "../src/preview.js"
 import { createMemoryStore, type DeviceRecord, type Store } from "../src/store.js"
 import type { WorktreeManager } from "../src/worktrees.js"
 
@@ -104,6 +108,11 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     worktreesRoot: "/tmp/masterhand-worktrees",
     gitUserName: "MasterHand Tests",
     gitUserEmail: "tests@masterhand.local",
+    previewEnabled: true,
+    previewOrigin: "127.0.0.1",
+    previewPortRange: { min: 32900, max: 32999 },
+    previewReadinessMs: 25_000,
+    cloudflaredBin: "cloudflared",
     ...overrides,
   }
 }
@@ -154,7 +163,65 @@ export interface TestApp {
   config: Config
   store: Store
   hub: EventHub
+  preview: PreviewManager
   close(): Promise<void>
+}
+
+export interface FakeTunnel {
+  spawnImpl: typeof import("node:child_process").spawn
+  /** Every spawned fake process, in order. */
+  children: ChildProcess[]
+  /** Command and args of every spawn call. */
+  calls: { command: string; args: string[] }[]
+  url: string
+}
+
+interface FakeChildProcess extends EventEmitter {
+  stdout: PassThrough
+  stderr: PassThrough
+  exitCode: number | null
+  signalCode: NodeJS.Signals | null
+  kill(signal?: NodeJS.Signals): boolean
+}
+
+/**
+ * Stand-in for the `cloudflared` process: emits a trycloudflare URL and stays
+ * alive until killed. Set `fail` to make it exit before announcing a URL.
+ */
+export function createFakeTunnel(
+  url = "https://fake-preview.trycloudflare.com",
+  options: { fail?: boolean; silent?: boolean } = {},
+): FakeTunnel {
+  const children: ChildProcess[] = []
+  const calls: FakeTunnel["calls"] = []
+  const spawnImpl = ((command: string, args: string[]): ChildProcess => {
+    calls.push({ command, args })
+    const child = new EventEmitter() as unknown as FakeChildProcess
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.exitCode = null
+    child.signalCode = null
+    child.kill = (signal?: NodeJS.Signals) => {
+      if (child.exitCode !== null || child.signalCode !== null) return true
+      child.exitCode = 0
+      child.signalCode = signal ?? "SIGTERM"
+      child.emit("exit", 0, child.signalCode)
+      return true
+    }
+    children.push(child as unknown as ChildProcess)
+    if (!options.silent) {
+      setTimeout(() => {
+        if (options.fail) {
+          child.exitCode = 1
+          child.emit("exit", 1, null)
+          return
+        }
+        child.stderr.write(`Your quick Tunnel has been created! Visit it at ${url}\n`)
+      }, 5)
+    }
+    return child as unknown as ChildProcess
+  }) as unknown as typeof import("node:child_process").spawn
+  return { spawnImpl, children, calls, url }
 }
 
 export async function startTestApp(
@@ -164,6 +231,16 @@ export async function startTestApp(
     removeDir?: (path: string) => void
     worktrees?: WorktreeManager
     fetchImpl?: typeof fetch
+    preview?: PreviewManager
+    previewOptions?: {
+      spawnImpl?: typeof import("node:child_process").spawn
+      probe?: (host: string, port: number, timeoutMs: number) => Promise<boolean>
+      available?: () => boolean
+      readinessImpl?: (url: string) => Promise<boolean>
+      urlTimeoutMs?: number
+      readinessTimeoutMs?: number
+      readinessIntervalMs?: number
+    }
   } = {},
 ): Promise<TestApp> {
   const config = testConfig(options.config)
@@ -174,6 +251,19 @@ export async function startTestApp(
     reconnectBaseMs: 50,
     reconnectMaxMs: 200,
   })
+  const preview =
+    options.preview ??
+    createPreviewManager({
+      config,
+      store,
+      availableImpl: options.previewOptions?.available ?? (() => true),
+      probe: options.previewOptions?.probe ?? (async () => true),
+      readinessImpl: options.previewOptions?.readinessImpl ?? (async () => true),
+      spawnImpl: options.previewOptions?.spawnImpl,
+      urlTimeoutMs: options.previewOptions?.urlTimeoutMs,
+      readinessTimeoutMs: options.previewOptions?.readinessTimeoutMs,
+      readinessIntervalMs: options.previewOptions?.readinessIntervalMs,
+    })
   const app = createApp({
     config,
     store,
@@ -182,6 +272,7 @@ export async function startTestApp(
     removeDir: options.removeDir ?? (() => {}),
     worktrees: options.worktrees ?? createFakeWorktreeManager(),
     fetchImpl: options.fetchImpl,
+    preview,
   })
   const server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" })
   await new Promise<void>((resolve) => server.once("listening", resolve))
@@ -194,7 +285,9 @@ export async function startTestApp(
     config,
     store,
     hub,
+    preview,
     close: async () => {
+      preview.stopAll()
       hub.stop()
       await new Promise<void>((resolve) => server.close(() => resolve()))
     },

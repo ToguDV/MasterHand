@@ -10,6 +10,7 @@ import type {
   MessageWithPartsResponse,
   Permission,
   PermissionResponse,
+  PreviewStatus,
   Project,
   PromptBody,
   ProvidersResponse,
@@ -79,6 +80,10 @@ export interface Client {
     config(): Promise<Config>
     statuses(): Promise<SessionStatuses>
     projects(): Promise<Project[]>
+    /** Live preview (Cloudflare quick tunnel) for a session. */
+    preview(sessionID: string): Promise<PreviewStatus>
+    startPreview(sessionID: string): Promise<PreviewStatus>
+    stopPreview(sessionID: string): Promise<void>
   }
   workspaces: {
     list(): Promise<WorkspaceRecord[]>
@@ -192,6 +197,16 @@ export function createClient(options: ClientOptions = {}): Client {
       config: () => opencode<Config>("/config"),
       statuses: () => opencode<SessionStatuses>("/session/status"),
       projects: () => opencode<Project[]>("/project"),
+      preview: (sessionID) =>
+        request<{ preview: PreviewStatus }>(`/api/sessions/${encodeURIComponent(sessionID)}/preview`).then(
+          (response) => response.preview,
+        ),
+      startPreview: (sessionID) =>
+        request<{ preview: PreviewStatus }>(`/api/sessions/${encodeURIComponent(sessionID)}/preview`, {
+          method: "POST",
+        }).then((response) => response.preview),
+      stopPreview: (sessionID) =>
+        request<void>(`/api/sessions/${encodeURIComponent(sessionID)}/preview`, { method: "DELETE" }),
     },
     workspaces: {
       list: () => request<{ workspaces: WorkspaceRecord[] }>("/api/workspaces").then((response) => response.workspaces),
