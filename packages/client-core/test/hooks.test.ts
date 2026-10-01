@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
+import { toChatMessage } from "../src/chat"
 import { createEventHandler, invalidateOnReconnect, queryKeys } from "../src/hooks"
 import type { ChatMessage, ChatPart, ChatToolPart, Permission, TokenUsageInfo } from "../src/types"
 
@@ -236,6 +237,33 @@ describe("createEventHandler", () => {
     emit(handler, "session.text.delta", { sessionID: SESSION, assistantMessageID: "msg_1", ordinal: 0, delta: "lo" })
     expect(cachedParts(qc)).toEqual([
       { id: "msg_1:text:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "hello" },
+    ])
+  })
+
+  it("merges deltas into a projected history snapshot fetched mid-stream", () => {
+    const { qc } = makeQueryClient()
+    const handler = createEventHandler(qc)
+    const projected = toChatMessage(
+      {
+        type: "assistant",
+        id: "msg_1",
+        time: { created: 1 },
+        agent: "build",
+        model: { id: "test-model", providerID: "test" },
+        content: [
+          { type: "text", text: "Working" },
+          { type: "reasoning", text: "thinking" },
+        ],
+      },
+      SESSION,
+    )
+    qc.setQueryData(queryKeys.messages(SESSION), [projected!])
+
+    emit(handler, "session.text.delta", { sessionID: SESSION, assistantMessageID: "msg_1", ordinal: 0, delta: "…" })
+
+    const parts = cachedParts(qc)
+    expect(parts.filter((part) => part.type === "text")).toEqual([
+      { id: "msg_1:text:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "Working…" },
     ])
   })
 

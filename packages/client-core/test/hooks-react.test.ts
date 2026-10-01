@@ -6,7 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Client } from "../src/client"
+import type { ChatMessage } from "../src/types"
 import {
+  queryKeys,
   useAgents,
   useBffStatus,
   useEventStream,
@@ -37,7 +39,7 @@ function makeClient(stream = makeEventStream()) {
   const api = {
     sessions,
     statuses: vi.fn(async () => ({})),
-    messages: vi.fn(async () => []),
+    messages: vi.fn(async (): Promise<ChatMessage[]> => []),
     agents: vi.fn(async () => []),
     models: vi.fn(async () => ({ models: [], providers: [], defaultModel: null })),
     preview: vi.fn(async () => ({ status: "stopped", url: null, port: null, error: null })),
@@ -113,6 +115,36 @@ describe("query hooks", () => {
     })
     await waitFor(() => expect(enabled.result.current.isSuccess).toBe(true))
     expect(api.messages).toHaveBeenCalledWith("ses_1")
+  })
+
+  it("useMessages preserves live streamed text when the projection is still open", async () => {
+    const qc = newQueryClient()
+    const { client, api } = makeClient()
+    const projected: ChatMessage[] = [
+      {
+        info: { id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1 } },
+        parts: [{ id: "msg_1:text:0", sessionID: "ses_1", messageID: "msg_1", type: "text", text: "" }],
+      },
+    ]
+    api.messages.mockResolvedValue(projected)
+
+    const { result } = renderHook(() => useMessages(client, "ses_1", { connected: true, busy: true }), {
+      wrapper: wrapper(qc),
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    // A live delta lands in the cache while the step is still streaming.
+    qc.setQueryData<ChatMessage[]>(queryKeys.messages("ses_1"), [
+      {
+        info: { id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1 } },
+        parts: [{ id: "msg_1:text:0", sessionID: "ses_1", messageID: "msg_1", type: "text", text: "Working…" }],
+      },
+    ])
+
+    const refetched = await result.current.refetch()
+    expect(refetched.data?.[0]?.parts).toEqual([
+      { id: "msg_1:text:0", sessionID: "ses_1", messageID: "msg_1", type: "text", text: "Working…" },
+    ])
   })
 
   it("useSessionDirectories loads the directory list for a workspace", async () => {

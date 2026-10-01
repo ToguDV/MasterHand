@@ -18,6 +18,7 @@ import {
   isStreaming,
   isTaskTool,
   makeToolPart,
+  mergeLiveMessages,
   messageText,
   partsFromContent,
   placeholderAssistant,
@@ -116,8 +117,8 @@ describe("toChatMessage", () => {
       error: { type: "ProviderError", message: "nope", status: 500 },
     })
     expect(message?.parts.map((part) => part.type)).toEqual(["text", "reasoning"])
-    expect(message?.parts[0]?.id).toBe("msg_a:0")
-    expect(message?.parts[1]?.id).toBe("msg_a:1")
+    expect(message?.parts[0]?.id).toBe("msg_a:text:0")
+    expect(message?.parts[1]?.id).toBe("msg_a:reasoning:0")
   })
 
   it("tolerates assistant messages without model or usage", () => {
@@ -270,7 +271,7 @@ describe("toChatMessage", () => {
 })
 
 describe("partsFromContent", () => {
-  it("projects text, reasoning and tool parts with ordinal ids", () => {
+  it("projects text, reasoning and tool parts with per-kind ordinal ids", () => {
     const parts = partsFromContent(
       [
         { type: "text", text: "hello" },
@@ -282,12 +283,27 @@ describe("partsFromContent", () => {
     )
 
     expect(parts.map((part) => [part.id, part.type])).toEqual([
-      ["msg_1:0", "text"],
-      ["msg_1:1", "reasoning"],
+      ["msg_1:text:0", "text"],
+      ["msg_1:reasoning:0", "reasoning"],
       ["t1", "tool"],
     ])
-    expect(parts[0]).toEqual({ id: "msg_1:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "hello" })
+    expect(parts[0]).toEqual({ id: "msg_1:text:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "hello" })
     expect(parts[2]).toMatchObject({ type: "tool", tool: "bash", callID: "t1" })
+  })
+
+  it("numbers repeated parts of the same kind with the streaming scheme", () => {
+    const parts = partsFromContent(
+      [
+        { type: "text", text: "first" },
+        { type: "tool", id: "t1", name: "bash", state: { status: "running", input: {}, metadata: {} } },
+        { type: "text", text: "second" },
+        { type: "reasoning", text: "why" },
+      ],
+      SESSION,
+      "msg_1",
+    )
+
+    expect(parts.map((part) => part.id)).toEqual(["msg_1:text:0", "t1", "msg_1:text:1", "msg_1:reasoning:0"])
   })
 
   it("returns an empty list for empty content", () => {
@@ -386,6 +402,56 @@ describe("streaming reducers", () => {
       type: "reasoning",
       text: "done",
     })
+  })
+})
+
+describe("mergeLiveMessages", () => {
+  it("keeps streamed text while the projected step is still open", () => {
+    const live = [chatMessage("msg_1", [textPart("msg_1:text:0", "Working…")])]
+    const projected = [chatMessage("msg_1", [textPart("msg_1:text:0", "")])]
+
+    expect(mergeLiveMessages(live, projected)).toEqual(live)
+  })
+
+  it("keeps live parts the projection does not carry yet", () => {
+    const live = [
+      chatMessage("msg_1", [
+        textPart("msg_1:text:0", "Working…"),
+        textPart("msg_1:text:1", "more", "msg_1"),
+      ]),
+    ]
+    const projected = [chatMessage("msg_1", [textPart("msg_1:text:0", "")])]
+
+    expect(mergeLiveMessages(live, projected)[0]?.parts.map((part) => part.id)).toEqual([
+      "msg_1:text:0",
+      "msg_1:text:1",
+    ])
+  })
+
+  it("takes the authoritative projection once the message completes", () => {
+    const live = [chatMessage("msg_1", [textPart("msg_1:text:0", "Working…")])]
+    const completed: ChatMessage = {
+      info: { id: "msg_1", sessionID: SESSION, role: "assistant", time: { created: 1, completed: 2 } },
+      parts: [textPart("msg_1:text:0", "final text")],
+    }
+
+    expect(mergeLiveMessages(live, [completed])).toEqual([completed])
+  })
+
+  it("keeps the projected tool state over the live one", () => {
+    const live = [chatMessage("msg_1", [toolPart("call_1", { status: "running", input: {} })])]
+    const projected = [
+      chatMessage("msg_1", [toolPart("call_1", { status: "completed", input: {}, output: "done" })]),
+    ]
+
+    const merged = mergeLiveMessages(live, projected)
+    expect(merged[0]?.parts).toEqual(projected[0]?.parts)
+  })
+
+  it("returns the projection when there is no live cache", () => {
+    const projected = [chatMessage("msg_1", [textPart("msg_1:text:0", "")])]
+    expect(mergeLiveMessages(undefined, projected)).toBe(projected)
+    expect(mergeLiveMessages([], projected)).toBe(projected)
   })
 })
 

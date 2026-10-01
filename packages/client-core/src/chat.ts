@@ -85,13 +85,40 @@ type RawContentPart =
   | { type: "reasoning"; text: string }
   | { type: "tool"; id: string; name: string; state: unknown }
 
+export type StreamKind = "text" | "reasoning"
+
+/** Part id shared by streaming events and projected snapshots. */
+function streamPartID(messageID: string, kind: StreamKind, ordinal: number): string {
+  return `${messageID}:${kind}:${ordinal}`
+}
+
+/**
+ * Projects assistant content with the streaming event ids. opencode v2 numbers
+ * text and reasoning ordinals per kind, so the projection must too: otherwise a
+ * history refetch mid-stream stores a second part with a different id and the
+ * next delta appends to a duplicate.
+ */
+function projectContent(
+  content: ReadonlyArray<RawContentPart>,
+  sessionID: string,
+  messageID: string,
+): ChatPart[] {
+  const ordinals: Record<StreamKind, number> = { text: 0, reasoning: 0 }
+  return content.map((part) => {
+    if (part.type === "tool") return toChatPart(part, sessionID, messageID, part.id)
+    const ordinal = ordinals[part.type]
+    ordinals[part.type] = ordinal + 1
+    return toChatPart(part, sessionID, messageID, streamPartID(messageID, part.type, ordinal))
+  })
+}
+
 /** Maps a full assistant content snapshot (from a durable event). */
 export function partsFromContent(
   content: ReadonlyArray<RawContentPart>,
   sessionID: string,
   messageID: string,
 ): ChatPart[] {
-  return content.map((part, index) => toChatPart(part, sessionID, messageID, `${messageID}:${index}`))
+  return projectContent(content, sessionID, messageID)
 }
 
 /**
@@ -129,7 +156,7 @@ export function toChatMessage(message: SessionMessageInfo, sessionID: string): C
       tokens: message.tokens,
       error: message.error,
     },
-    parts: message.content.map((part, index) => toChatPart(part, sessionID, message.id, `${message.id}:${index}`)),
+    parts: projectContent(message.content, sessionID, message.id),
   }
 }
 
@@ -138,6 +165,43 @@ export function placeholderAssistant(sessionID: string, messageID: string, now =
     info: { id: messageID, sessionID, role: "assistant", time: { created: now } },
     parts: [],
   }
+}
+
+/**
+ * Merges a history projection with the live cache. opencode's projection
+ * includes the in-flight assistant message but omits its accumulated text
+ * until the step closes (verified against a live 2.0.21 server), so live parts
+ * are preserved while the message is incomplete; completed messages are
+ * authoritative projections.
+ */
+export function mergeLiveMessages(
+  previous: ChatMessage[] | undefined,
+  projected: ChatMessage[],
+): ChatMessage[] {
+  if (!previous || previous.length === 0) return projected
+  const byID = new Map(previous.map((message) => [message.info.id, message]))
+  return projected.map((message) => {
+    if (message.info.role !== "assistant" || message.info.time.completed !== undefined) return message
+    const live = byID.get(message.info.id)
+    if (!live) return message
+
+    const merged = message.parts.map((part): ChatPart => {
+      const livePart = live.parts.find((item) => item.id === part.id)
+      // Tool parts come from the authoritative projection; for streamed text
+      // and reasoning, keep the live part when it already has more text.
+      if (!livePart) return part
+      if (part.type === "text" && livePart.type === "text") {
+        return livePart.text.length > part.text.length ? livePart : part
+      }
+      if (part.type === "reasoning" && livePart.type === "reasoning") {
+        return livePart.text.length > part.text.length ? livePart : part
+      }
+      return part
+    })
+    const ids = new Set(merged.map((part) => part.id))
+    for (const part of live.parts) if (!ids.has(part.id)) merged.push(part)
+    return { ...message, parts: merged }
+  })
 }
 
 export function upsertMessage(list: ChatMessage[], message: ChatMessage): ChatMessage[] {
@@ -184,15 +248,13 @@ function updateParts(
   )
 }
 
-export type StreamKind = "text" | "reasoning"
-
 /** Appends a streaming delta to a text/reasoning part (keyed by its ordinal). */
 export function appendDelta(
   list: ChatMessage[],
   event: { sessionID: string; messageID: string; ordinal: number; kind: StreamKind; delta: string },
   now = Date.now(),
 ): ChatMessage[] {
-  const partID = `${event.messageID}:${event.kind}:${event.ordinal}`
+  const partID = streamPartID(event.messageID, event.kind, event.ordinal)
   return updateParts(
     list,
     event.sessionID,
@@ -221,7 +283,7 @@ export function setStreamText(
   event: { sessionID: string; messageID: string; ordinal: number; kind: StreamKind; text: string },
   now = Date.now(),
 ): ChatMessage[] {
-  const partID = `${event.messageID}:${event.kind}:${event.ordinal}`
+  const partID = streamPartID(event.messageID, event.kind, event.ordinal)
   return updateParts(
     list,
     event.sessionID,

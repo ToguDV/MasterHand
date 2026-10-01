@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react"
-import { useQuery, type QueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import type { Client } from "./client"
 import {
   appendDelta,
   makeToolPart,
+  mergeLiveMessages,
   setMessageCost,
   setStreamText,
   updateToolPart,
@@ -86,9 +87,16 @@ export function useMessages(
   sessionID: string | null,
   options: { connected: boolean; busy: boolean },
 ) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: queryKeys.messages(sessionID ?? ""),
-    queryFn: () => client.api.messages(sessionID!),
+    queryFn: async () => {
+      const projected = await client.api.messages(sessionID!)
+      const previous = queryClient.getQueryData<ChatMessage[]>(queryKeys.messages(sessionID!))
+      // A refetch mid-step must not drop the text already accumulated from
+      // events: the projection only carries it once the step closes.
+      return mergeLiveMessages(previous, projected)
+    },
     enabled: Boolean(sessionID),
     staleTime: 30_000,
     refetchOnWindowFocus: false,

@@ -72,9 +72,10 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 1. The client sends `POST /api/oc/api/session/:id/prompt` through the BFF (which adds opencode's basic auth). Model and agent are **not** part of the prompt: when the composer selection differs from the session's remembered `agent`/`model`, the client first calls `POST /api/oc/api/session/:id/agent` and/or `/model` (with the variant inside `Model.Ref`) and only then prompts.
 2. opencode admits the input and returns the inbox item; the agent runs.
 3. The BFF keeps a permanent SSE connection to opencode's `GET /api/event` (all locations; each frame is one v2 event object) and re-emits it on the BFF's `GET /api/events`.
-4. The client renders live streaming from the granular events: `session.text.*` and `session.reasoning.*` deltas (keyed by `assistantMessageID` + `ordinal`), `session.tool.*` for tool cards and `session.step.ended` for cost/tokens.
+4. The client renders live streaming from the granular events: `session.text.*` and `session.reasoning.*` deltas (keyed by `assistantMessageID` + `ordinal`, numbered per kind), `session.tool.*` for tool cards and `session.step.ended` for cost/tokens.
 5. When the turn ends, opencode emits `session.execution.succeeded` (or `failed`/`interrupted`); the client refetches the projected messages, which replace the live state.
-6. Each composer remembers the agent, model and effort (`variant`) chosen **per session**, stored client-side (`localStorage` on web, SecureStore on mobile) and restored when the session is reopened; new sessions keep falling back to the last used model.
+6. While a step is streaming, the projection includes the in-flight assistant message but omits its accumulated text (verified against a live 2.0.21 server); a mid-step refetch therefore merges the live text/reasoning parts instead of dropping them (`mergeLiveMessages`).
+7. Each composer remembers the agent, model and effort (`variant`) chosen **per session**, stored client-side (`localStorage` on web, SecureStore on mobile) and restored when the session is reopened; new sessions keep falling back to the last used model.
 
 ### 4.2 Permission approvals
 
@@ -102,8 +103,8 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 ### 4.5 Reconnection (mobile / background)
 
 - SSE does not guarantee event replay.
-- On reconnect (or when returning from background), clients refetch `GET /api/oc/api/session/:id/message` and replace their live state with the projection.
-- Streaming events are keyed: text/reasoning by `assistantMessageID` + `ordinal`, tool parts by their call `id`. Deltas append; `*.ended` carries the final text; tool `success`/`failed` carries the result `content`.
+- On reconnect (or when returning from background), clients refetch `GET /api/oc/api/session/:id/message` and replace their live state with the projection, except for the text/reasoning parts of a message still streaming (the projection does not carry them until the step closes).
+- Streaming events are keyed: text/reasoning by `assistantMessageID` + `ordinal` (numbered per kind), tool parts by their call `id`. Deltas append; `*.ended` carries the final text; tool `success`/`failed` carries the result `content`.
 - Client inactivity watchdog (60s without bytes → forced reconnect), reconnect when the tab/app becomes visible (`visibilitychange`) and when the network returns (`online`).
 - On (re)connect, `sessions`, `messages` and `statuses` are invalidated to reconcile missed events.
 - Pending permissions are reconciled too (`GET /api/oc/api/permission/request` per workspace): a `permission.asked` lost while offline would otherwise leave the agent blocked with no prompt.

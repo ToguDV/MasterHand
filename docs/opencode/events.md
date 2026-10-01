@@ -52,10 +52,10 @@ Not consumed yet (present in v2): `session.compaction.*`, `session.shell.*`, `se
 
 ## Streaming model
 
-- Text and reasoning parts are identified by `assistantMessageID` + `ordinal`; deltas append and the matching `*.ended` carries the final text.
+- Text and reasoning parts are identified by `assistantMessageID` + `ordinal`; the ordinal numbers parts **per kind** (text parts 0, 1, … independently from reasoning parts), so projections and events must use the same per-kind counter as the part id. Deltas append and the matching `*.ended` carries the final text.
 - Tool parts are identified by their call `id`; the tool name only arrives in `session.tool.input.started`, so a tool event that appears first is shown with the call id until the name arrives.
 - `session.step.ended` closes a step with authoritative `cost`/`tokens`; `session.execution.succeeded` (or `failed`/`interrupted`) ends the turn, after which the client refetches `GET /api/session/:id/message` and replaces its live state with the projected history.
-- Live messages are only merged when the session's message list is already cached; the authoritative projection always wins on refetch.
+- While a step is open, the projection **includes the in-flight assistant message but omits its accumulated text** — verified against a live 2.0.21 server: polls during streaming return `content` with empty text, and the full text appears only when `time.completed` is set. A client that refetches mid-step must therefore preserve its live text/reasoning parts (MasterHand's `mergeLiveMessages`); completed messages are authoritative projections.
 
 ## Referenced types
 
