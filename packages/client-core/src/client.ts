@@ -181,11 +181,14 @@ export function createClient(options: ClientOptions = {}): Client {
     const messages: ChatMessage[] = []
     let cursor: string | undefined
     for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
-      // opencode rejects combining `order` with a cursor: it is only for the first page.
+      // opencode rejects combining `order` with a cursor: it is only for the
+      // first page, and the pages that follow keep that order (verified against
+      // a live 2.0.21 server). Newest first, so hitting the page cap drops old
+      // history — never the messages being read.
       const response = await opencode.message.list(
         cursor
           ? { sessionID, limit: MESSAGE_PAGE_SIZE, cursor }
-          : { sessionID, order: "asc", limit: MESSAGE_PAGE_SIZE },
+          : { sessionID, order: "desc", limit: MESSAGE_PAGE_SIZE },
       )
       for (const message of response.data) {
         const chat = toChatMessage(message, sessionID)
@@ -195,7 +198,8 @@ export function createClient(options: ClientOptions = {}): Client {
       if (!next) break
       cursor = next
     }
-    return messages
+    // The UI and the streaming reducers expect chronological order.
+    return messages.reverse()
   }
 
   return {

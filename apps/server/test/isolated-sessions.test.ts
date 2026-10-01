@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { createFakeWorktreeManager, login, startTestApp } from "./helpers.js"
+import { createFakeWorktreeManager, login, startMockOpencode, startTestApp, waitFor } from "./helpers.js"
 
 interface MockSession {
   id: string
@@ -64,10 +64,13 @@ function createOpencodeMock(options: { pageSize?: number } = {}) {
   return { fetchImpl, sessions, calls }
 }
 
-async function setupApp(mockOptions: { pageSize?: number } = {}) {
+async function setupApp(
+  mockOptions: { pageSize?: number } = {},
+  appOptions: { sessionsCacheMs?: number } = {},
+) {
   const opencode = createOpencodeMock(mockOptions)
   const worktrees = createFakeWorktreeManager()
-  const app = await startTestApp({ worktrees, fetchImpl: opencode.fetchImpl })
+  const app = await startTestApp({ worktrees, fetchImpl: opencode.fetchImpl, ...appOptions })
   const cookie = await login(app.url)
   const headers = { cookie, "content-type": "application/json" }
 
@@ -230,6 +233,100 @@ describe("GET /api/workspaces/:id/sessions", () => {
       expect(lists[1]?.query.get("cursor")).toBe("1")
     } finally {
       await app.close()
+    }
+  })
+
+  it("serves repeated listings from a short-lived per-directory cache", async () => {
+    const { app, opencode, headers, workspace } = await setupApp()
+    try {
+      await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+      await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+
+      const lists = opencode.calls.filter((call) => call.method === "GET" && call.path === "/api/session")
+      expect(lists).toHaveLength(1)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it("invalidates the aggregation cache when a session is created or deleted", async () => {
+    const { app, opencode, headers, workspace } = await setupApp()
+    try {
+      const list = () => fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+      await list()
+
+      const created = await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      })
+      const { session } = (await created.json()) as { session: { id: string } }
+
+      const afterCreate = await list()
+      const body = (await afterCreate.json()) as { sessions: Array<{ id: string }> }
+      expect(body.sessions.some((item) => item.id === session.id)).toBe(true)
+
+      await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions/${session.id}`, {
+        method: "DELETE",
+        headers,
+      })
+      await list()
+
+      const lists = opencode.calls.filter((call) => call.method === "GET" && call.path === "/api/session")
+      expect(lists).toHaveLength(3)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it("refetches after the per-directory cache TTL expires", async () => {
+    const { app, opencode, headers, workspace } = await setupApp({}, { sessionsCacheMs: 20 })
+    try {
+      await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+
+      const lists = opencode.calls.filter((call) => call.method === "GET" && call.path === "/api/session")
+      expect(lists).toHaveLength(2)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it("invalidates the cache when opencode reports a session event", async () => {
+    const upstream = await startMockOpencode()
+    const app = await startTestApp({ config: { opencodeUrl: upstream.url } })
+    try {
+      const cookie = await login(app.url)
+      const headers = { cookie, "content-type": "application/json" }
+      const created = await fetch(`${app.url}/api/workspaces`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "app" }),
+      })
+      const { workspace } = (await created.json()) as { workspace: { id: string } }
+
+      const list = () => fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+      const lists = () =>
+        upstream.requests.filter((request) => request.method === "GET" && request.path === "/api/session")
+
+      await waitFor(() => upstream.requests.some((request) => request.path === "/api/event"))
+      await list()
+      await list()
+      expect(lists()).toHaveLength(1)
+
+      let seen = false
+      app.hub.subscribe((event) => {
+        if ((event as { type?: string }).type === "session.created") seen = true
+      })
+      upstream.emit({ id: "evt_1", type: "session.created", data: { sessionID: "ses_x" } })
+      await waitFor(() => seen)
+
+      await list()
+      expect(lists()).toHaveLength(2)
+    } finally {
+      await app.close()
+      await upstream.close()
     }
   })
 
