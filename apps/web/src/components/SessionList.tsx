@@ -3,6 +3,7 @@ import {
   directoryName,
   filterSessions,
   formatRelative,
+  rootSessions,
   type Session,
   type SessionFilter,
   type SessionStatus,
@@ -35,7 +36,8 @@ export function SessionList({
 }) {
   const [filter, setFilter] = useState<SessionFilter>("all")
   const [isolated, setIsolated] = useState(false)
-  const visible = filterSessions(sessions, filter)
+  // Subagent children are reachable from their parent's card, not the list.
+  const visible = filterSessions(rootSessions(sessions), filter)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

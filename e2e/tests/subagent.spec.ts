@@ -22,6 +22,8 @@ test("renders subagent runs as a custom card and opens the child session", async
 
   await main.getByRole("button", { name: /Open session/ }).click()
   await expect(page.locator("header").getByText("Explore the repository (@explore subagent)")).toBeVisible()
+  // The child is reachable through the card, not listed as a top-level session.
+  await expect(page.locator("aside").getByText("Explore the repository (@explore subagent)")).toHaveCount(0)
 
   const back = page.getByRole("button", { name: /Back to main agent/ })
   await expect(back).toBeVisible()

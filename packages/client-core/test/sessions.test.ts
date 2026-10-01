@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { filterSessions, sessionDirectory } from "../src/sessions"
+import { filterSessions, rootSessions, sessionDirectory } from "../src/sessions"
 import type { Session } from "../src/types"
 
 function session(id: string, isolation?: Session["isolation"]): Session {
@@ -23,6 +23,14 @@ describe("filterSessions", () => {
   it("keeps only isolated or only standard sessions", () => {
     expect(filterSessions(sessions, "isolated").map((item) => item.id)).toEqual(["ses_iso"])
     expect(filterSessions(sessions, "standard").map((item) => item.id)).toEqual(["ses_plain"])
+  })
+})
+
+describe("rootSessions", () => {
+  it("hides subagent children from the list", () => {
+    const parent = session("ses_parent")
+    const child = { id: "ses_child", parentID: "ses_parent" } as Session
+    expect(rootSessions([parent, child]).map((item) => item.id)).toEqual(["ses_parent"])
   })
 })
 
