@@ -37,7 +37,10 @@ const sessions = new Map<string, Record<string, unknown>>()
 const conversations = new Map<string, ConversationEntry[]>()
 const pendingPermissions = new Map<string, PendingPermission>()
 
-let sequence = 0
+// Seed from the clock so ids never repeat across runs: the BFF reuses a
+// persistent SQLite DATA_DIR locally, so restarting at `ses_1` every time
+// collided with the `isolated_sessions.session_id` primary key.
+let sequence = Date.now()
 const nextId = (prefix: string): string => `${prefix}_${(++sequence).toString(36)}`
 const now = (): number => Date.now()
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
