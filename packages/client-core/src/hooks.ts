@@ -117,6 +117,8 @@ export interface EventHandlerCallbacks {
   onPermission?: (permission: Permission) => void
   onPermissionReplied?: (permissionID: string) => void
   onSessionError?: (message: string) => void
+  /** opencode (re)connected upstream: reconcile state that SSE never replays. */
+  onServerConnected?: () => void
 }
 
 function parseRawInput(raw: string | undefined): Record<string, unknown> {
@@ -171,6 +173,7 @@ export function createEventHandler(
         // (e.g. a dev-server restart) keeps failed agent/model catalogs and
         // messages until it is reloaded. This event is the recovery signal.
         invalidateOnReconnect(queryClient)
+        callbacks.onServerConnected?.()
         return
       case "agent.updated":
       case "model.updated":

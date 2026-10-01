@@ -73,11 +73,15 @@ describe("createEventHandler", () => {
 
   it("recovers missed state when opencode (re)connects", () => {
     const { qc, invalidate } = makeQueryClient()
-    const handler = createEventHandler(qc)
+    const onServerConnected = vi.fn()
+    const handler = createEventHandler(qc, { onServerConnected })
     emit(handler, "server.connected", {})
+    expect(onServerConnected).toHaveBeenCalledTimes(1)
+    expect(invalidate).toHaveBeenCalledTimes(6)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["messages"] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.statuses })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["directories"] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
   })

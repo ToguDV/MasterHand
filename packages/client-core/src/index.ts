@@ -60,3 +60,4 @@ export {
   type UseEventStreamOptions,
 } from "./hooks"
 export { filterSessions, rootSessions, sessionDirectory, type SessionFilter } from "./sessions"
+export { reconcilePermissions } from "./permissions"

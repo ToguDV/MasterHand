@@ -447,6 +447,24 @@ const server = createServer((req, res) => {
     if (req.method === "GET" && path === "/e2e/state") {
       return json(res, 200, { offline, ...catalogRequests })
     }
+
+    // E2E controls for missed-events scenarios.
+    if (req.method === "GET" && path === "/e2e/pending") {
+      return json(res, 200, { pending: [...pendingPermissions.keys()] })
+    }
+    // Resolves a pending request without broadcasting `permission.replied`,
+    // simulating another device answering while this client is offline.
+    if (req.method === "POST" && path === "/e2e/reply") {
+      const body = await readBody(req)
+      const requestID = typeof body.requestID === "string" ? body.requestID : ""
+      const pending = pendingPermissions.get(requestID)
+      if (pending) {
+        pendingPermissions.delete(requestID)
+        pending.resolve(typeof body.decision === "string" ? body.decision : "once")
+      }
+      return empty(res, 204)
+    }
+
     if (offline && path.startsWith("/api/")) {
       return json(res, 503, { error: "offline" })
     }
