@@ -14,7 +14,7 @@ MasterHand accepts two credential types on protected routes:
 
 Other rules:
 
-- Rate limit: 5 attempts per IP every 15 minutes (`429` when exceeded) shared by both login routes. Counted by `x-forwarded-for` or `unknown`.
+- Rate limit: 5 attempts per IP every 15 minutes (`429` when exceeded) shared by both login routes. Keyed on the real socket peer address (`getConnInfo`), not `X-Forwarded-For`: that header is client-controlled and would let an attacker rotate the key (`unknown` when the socket address is unavailable).
 - Mutations (`POST`/`PATCH`/...) with an `Origin` header must match the `Host`; otherwise `403`. Origins listed in `ALLOWED_ORIGINS` are also allowed (in development the Vite origins are added automatically). Bearer requests are exempt: browsers never attach tokens automatically, so they carry no CSRF risk.
 - Protected routes: everything under `/api/*` except `/api/health`, `/api/login`, `/api/logout` and `POST /api/devices`.
 

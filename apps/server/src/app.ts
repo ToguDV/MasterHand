@@ -178,10 +178,17 @@ export function createApp(deps: AppDeps): Hono {
       return
     }
     try {
-      await callOpencode(
+      const response = await callOpencode(
         `/api/experimental/session/${encodeURIComponent(sessionID)}/instructions/entries/masterhand.preview`,
         { method: "PUT", body: { value: previewSystemPrompt(port) } },
       )
+      if (!response.ok) {
+        // Never block session creation on this: the prompt also reaches the
+        // agent through the preview route, which retries the entry.
+        console.warn(
+          `[preview] could not store the masterhand.preview entry for ${sessionID} (HTTP ${response.status})`,
+        )
+      }
     } catch {
       // opencode unreachable: the preview will simply not know its port yet
     }
@@ -291,7 +298,12 @@ export function createApp(deps: AppDeps): Hono {
       let closed = false
       const unsubscribe = deps.hub.subscribe((event) => {
         if (closed) return
-        void stream.writeSSE({ data: JSON.stringify(event) })
+        // A rejected write means the client disconnected mid-frame; drop the
+        // subscription instead of leaking an unhandled rejection.
+        stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {
+          closed = true
+          unsubscribe()
+        })
       })
       stream.onAbort(() => {
         closed = true
