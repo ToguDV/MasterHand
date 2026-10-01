@@ -164,7 +164,7 @@ describe("createClient", () => {
       "DELETE https://mh.example/api/workspaces/ws_1/sessions/ses_1",
       "POST https://mh.example/api/isolated-sessions/ses_1/finish",
       "GET https://mh.example/api/workspaces/ws_1/directories",
-      "GET https://mh.example/api/oc/api/session/ses_1/message?limit=200&order=asc",
+      "GET https://mh.example/api/oc/api/session/ses_1/message?limit=200&order=desc",
       "POST https://mh.example/api/oc/api/session/ses_1/prompt",
       "POST https://mh.example/api/oc/api/session/ses_1/interrupt",
       "GET https://mh.example/api/oc/api/permission/request",
@@ -200,18 +200,18 @@ describe("createClient", () => {
 })
 
 describe("messages", () => {
-  it("walks the v2 cursor pages without combining order and cursor", async () => {
+  it("walks the v2 cursor pages newest-first without combining order and cursor", async () => {
     const { calls, fetchImpl } = recordingFetch(
-      () => messagesPage([userV2("msg_1")], "cur_1"),
-      () => messagesPage([userV2("msg_2"), idleV2("msg_ignored")], null),
+      () => messagesPage([userV2("msg_2", "newest")], "cur_1"),
+      () => messagesPage([userV2("msg_1"), idleV2("msg_ignored")], null),
     )
     const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
 
     const messages = await client.api.messages("ses_1")
     expect(messages.map((message) => message.info.id)).toEqual(["msg_1", "msg_2"])
-    expect(messages[0]?.parts[0]).toMatchObject({ type: "text", text: "hi" })
+    expect(messages[1]?.parts[0]).toMatchObject({ type: "text", text: "newest" })
     expect(calls).toHaveLength(2)
-    expect(calls[0]?.url).toBe("https://mh.example/api/oc/api/session/ses_1/message?limit=200&order=asc")
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/api/session/ses_1/message?limit=200&order=desc")
     expect(calls[1]?.url).toBe("https://mh.example/api/oc/api/session/ses_1/message?limit=200&cursor=cur_1")
     expect(calls[1]?.url).not.toContain("order=")
   })

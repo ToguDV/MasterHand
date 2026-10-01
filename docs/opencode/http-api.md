@@ -93,6 +93,6 @@ opencode v2 resolves a **location** instead of the old `directory` header:
 
 - `POST /api/session/:id/prompt` returns immediately with the admitted inbox item; progress arrives over SSE (`session.text.delta`, …) — the recommended UI flow.
 - Sessions persist the `agent` and `model` they last ran with; `GET /api/session` returns them, so clients can preselect the last used model.
-- Histories are paginated with an opaque cursor. `client-core` walks `cursor.next` (`order=asc`, 200 per page, 50 pages max) to load a full session.
+- Histories are paginated with an opaque cursor. `client-core` walks `cursor.next` (`order=desc`, 200 per page, 50 pages max) so the page cap drops old history instead of the newest messages, then reverses the pages to chronological order. Verified on a live 2.0.21 server: `order` is only accepted on the first page and the cursor pages keep that same order (both `asc` and `desc`).
 - In Docker it runs as the `opencode` Compose service listening on `0.0.0.0:4096` inside the internal network (no published ports), with `OPENCODE_SERVER_PASSWORD` in `.env`. Image: `npm install -g @opencode/cli@<version>` (`deploy/opencode.Dockerfile`).
 - v2 migrates v1 session data on first start (the server exposes `GET /api/experimental/migration/v1` to follow the progress). Back up the `opencode_data` volume before upgrading.

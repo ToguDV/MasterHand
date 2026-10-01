@@ -46,6 +46,8 @@ export interface AppDeps {
   worktrees?: WorktreeManager
   /** Overridable for tests: Cloudflare quick-tunnel previews. */
   preview?: PreviewManager
+  /** Overridable for tests: TTL of the per-directory session aggregation cache. */
+  sessionsCacheMs?: number
 }
 
 const KEEPALIVE_MS = 25_000
@@ -93,6 +95,18 @@ export function createApp(deps: AppDeps): Hono {
     })
   const preview = deps.preview ?? createPreviewManager({ config, store: deps.store })
 
+  // Clients poll the workspace session list every 10 s and each poll walks the
+  // v2 cursor pages per directory (base + worktrees). A short-lived per-directory
+  // cache absorbs concurrent devices and repeated polls; session mutations clear
+  // it, and opencode's own lifecycle events clear it too so out-of-band sessions
+  // (e.g. subagent children) show up immediately.
+  const sessionsCacheMs = deps.sessionsCacheMs ?? 5_000
+  const sessionsCache = new Map<string, { at: number; sessions: OpencodeSession[] }>()
+  deps.hub.subscribe((event) => {
+    const type = (event as { type?: unknown } | null)?.type
+    if (type === "session.created" || type === "session.deleted") invalidateSessionsCache()
+  })
+
   /**
    * Calls opencode directly (injecting basic auth). The `directory` override
    * travels as a query parameter exactly like the clients' proxy calls.
@@ -118,6 +132,9 @@ export function createApp(deps: AppDeps): Hono {
 
   /** Lists every session in a directory, following opencode's v2 cursor pagination. */
   async function sessionsInDirectory(directory: string): Promise<OpencodeSession[]> {
+    const cached = sessionsCache.get(directory)
+    if (cached && Date.now() - cached.at < sessionsCacheMs) return cached.sessions
+
     const sessions: OpencodeSession[] = []
     let cursor: string | undefined
     for (let page = 0; page < 50; page += 1) {
@@ -138,7 +155,13 @@ export function createApp(deps: AppDeps): Hono {
       if (!next) break
       cursor = next
     }
+    sessionsCache.set(directory, { at: Date.now(), sessions })
     return sessions
+  }
+
+  /** Session and worktree mutations make the aggregation cache stale. */
+  function invalidateSessionsCache(): void {
+    sessionsCache.clear()
   }
 
   /**
@@ -348,6 +371,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     deps.store.removeWorkspace(workspace.id)
+    invalidateSessionsCache()
     return c.json({ ok: true })
   })
 
@@ -411,6 +435,7 @@ export function createApp(deps: AppDeps): Hono {
       }
       if (!response.ok) return c.json({ error: "opencode_error" }, 502)
       const session = ((await response.json()) as { data: OpencodeSession }).data
+      invalidateSessionsCache()
       await ensurePreviewInstruction(session.id)
       return c.json({ session, isolation: null }, 201)
     }
@@ -439,6 +464,7 @@ export function createApp(deps: AppDeps): Hono {
       if (!response.ok) throw new Error("opencode_error")
       const session = ((await response.json()) as { data: OpencodeSession }).data
       sessionID = session.id
+      invalidateSessionsCache()
       await ensurePreviewInstruction(session.id)
 
       const record: IsolatedSessionRecord = {
@@ -483,6 +509,7 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "opencode_unreachable" }, 502)
     }
     if (!response.ok && response.status !== 404) return c.json({ error: "opencode_error" }, 502)
+    invalidateSessionsCache()
 
     if (isolated) {
       try {

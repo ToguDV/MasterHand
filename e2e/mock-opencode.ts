@@ -511,8 +511,14 @@ const server = createServer((req, res) => {
       const session = sessions.get(sessionID)
 
       if (req.method === "GET" && segments[3] === "message") {
-        const messages = [...(conversations.get(sessionID) ?? [])].sort((a, b) => a.time.created - b.time.created)
-        return json(res, 200, { data: messages, cursor: { previous: null, next: null } })
+        const all = [...(conversations.get(sessionID) ?? [])].sort((a, b) => a.time.created - b.time.created)
+        // v2: `order` only goes on the first page; cursor pages keep it implicit.
+        const ordered = url.searchParams.get("order") === "desc" ? [...all].reverse() : all
+        const limit = Number(url.searchParams.get("limit") ?? "200")
+        const offset = Number(url.searchParams.get("cursor") ?? "0")
+        const page = ordered.slice(offset, offset + limit)
+        const next = offset + limit < ordered.length ? String(offset + limit) : null
+        return json(res, 200, { data: page, cursor: { previous: null, next } })
       }
       if (req.method === "POST" && segments[3] === "prompt") {
         if (!session) return json(res, 404, { error: "not_found" })
