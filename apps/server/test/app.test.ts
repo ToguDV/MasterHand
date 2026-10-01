@@ -220,3 +220,22 @@ describe("origin checks", () => {
     expect(response.status).toBe(403)
   })
 })
+
+describe("login rate limiting", () => {
+  it("cannot be bypassed by rotating X-Forwarded-For", async () => {
+    app = await startTestApp()
+
+    const statuses: number[] = []
+    for (let i = 0; i < 6; i++) {
+      const response = await fetch(`${app.url}/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": `10.0.0.${i}` },
+        body: JSON.stringify({ password: "wrong" }),
+      })
+      statuses.push(response.status)
+    }
+
+    expect(statuses.slice(0, 5)).toEqual([401, 401, 401, 401, 401])
+    expect(statuses[5]).toBe(429)
+  })
+})

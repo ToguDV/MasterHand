@@ -75,6 +75,26 @@ describe("opencode proxy", () => {
     const response = await fetch(`${app.url}/api/oc/global/health`, { headers: { cookie } })
     expect(response.status).toBe(502)
   })
+
+  it("keeps the upstream origin fixed for protocol-relative paths (SSRF)", async () => {
+    const seen: string[] = []
+    const stub: typeof fetch = async (input) => {
+      seen.push(
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+      )
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }
+    app = await startTestApp({ config: { opencodeUrl: "http://127.0.0.1:4096" }, fetchImpl: stub })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/oc//evil.example.com/steal`, { headers: { cookie } })
+    expect(response.status).toBe(200)
+    expect(seen).toHaveLength(1)
+    expect(new URL(seen[0]!).host).toBe("127.0.0.1:4096")
+  })
 })
 
 describe("SSE relay", () => {
