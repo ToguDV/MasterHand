@@ -230,6 +230,7 @@ export function createPreviewManager(deps: PreviewManagerDeps): PreviewManager {
     const port = portFor(sessionID)
     const reachable = await probe(config.previewOrigin, port, PROBE_TIMEOUT_MS)
     if (!reachable) {
+      console.warn(`[preview] ${sessionID}: no server listening on ${config.previewOrigin}:${port}`)
       throw new PreviewError(
         "preview_not_running",
         `no server on ${config.previewOrigin}:${port}; ask the agent to start it first`,

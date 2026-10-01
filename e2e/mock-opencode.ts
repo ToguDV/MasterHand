@@ -423,26 +423,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`[mock-opencode] listening on http://127.0.0.1:${port}`)
 })
 
-// Optional dev-server stand-in so preview tests can pass the BFF's reachability
-// probe without running a real web server. A busy port must not crash the mock:
-// Playwright reuses servers across runs, and a previous listener may linger.
-const previewPort = Number(process.env.MOCK_PREVIEW_PORT ?? "")
-let previewServer: ReturnType<typeof createServer> | null = null
-if (Number.isFinite(previewPort) && previewPort > 0) {
-  previewServer = createServer((_req, res) => {
-    res.writeHead(200, { "content-type": "text/html" })
-    res.end("<!doctype html><h1>Preview</h1>")
-  })
-  previewServer.on("error", (error) => {
-    console.warn(`[mock-opencode] fake dev server unavailable: ${error.message}`)
-  })
-  previewServer.listen(previewPort, "127.0.0.1", () => {
-    console.log(`[mock-opencode] fake dev server on http://127.0.0.1:${previewPort}`)
-  })
-}
-
 function shutdown(): void {
-  previewServer?.close()
   server.close(() => process.exit(0))
   // Never hang the teardown if a connection stays open.
   setTimeout(() => process.exit(0), 1000).unref()

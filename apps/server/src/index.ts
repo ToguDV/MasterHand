@@ -61,7 +61,17 @@ function shutdown(): void {
   hub.stop()
   store.close()
   server.close(() => process.exit(0))
+  // `server.close` waits for open connections, and the SSE stream to every
+  // connected client is long-lived; never hang a SIGTERM (docker stop, tests).
+  setTimeout(() => process.exit(0), 3000).unref()
 }
 
-process.on("SIGTERM", shutdown)
-process.on("SIGINT", shutdown)
+let shuttingDown = false
+function handleSignal(): void {
+  if (shuttingDown) return
+  shuttingDown = true
+  shutdown()
+}
+
+process.on("SIGTERM", handleSignal)
+process.on("SIGINT", handleSignal)

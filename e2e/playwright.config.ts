@@ -6,7 +6,6 @@ const e2eDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(e2eDir, "..")
 
 const MOCK_PORT = 4097
-const MOCK_PREVIEW_PORT = 32950
 const BFF_PORT = 8788
 
 export default defineConfig({
@@ -28,7 +27,7 @@ export default defineConfig({
     {
       command: "npx tsx mock-opencode.ts",
       cwd: e2eDir,
-      env: { MOCK_PORT: String(MOCK_PORT), MOCK_PREVIEW_PORT: String(MOCK_PREVIEW_PORT) },
+      env: { MOCK_PORT: String(MOCK_PORT) },
       url: `http://127.0.0.1:${MOCK_PORT}/global/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
@@ -45,7 +44,10 @@ export default defineConfig({
         DATA_DIR: "/tmp/masterhand-e2e",
         WORKSPACES_ROOT: "/tmp/masterhand-e2e-workspace",
         PREVIEW_ORIGIN: "127.0.0.1",
-        PREVIEW_PORT_RANGE: `${MOCK_PREVIEW_PORT}-${MOCK_PREVIEW_PORT}`,
+        // The mock's own port doubles as the session's dev server: the BFF's
+        // reachability probe only needs a listener, and this avoids a second
+        // hardcoded port (32950 was already taken on GitHub runners).
+        PREVIEW_PORT_RANGE: `${MOCK_PORT}-${MOCK_PORT}`,
         // The fake trycloudflare URL is not a real host, so the BFF must not
         // wait for it to become reachable.
         PREVIEW_READINESS_MS: "0",
