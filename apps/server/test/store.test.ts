@@ -75,3 +75,32 @@ describe("memory workspace store", () => {
     store.close()
   })
 })
+
+describe("preview port store", () => {
+  it("persists reserved preview ports in sqlite", () => {
+    const dir = mkdtempSync(join(tmpdir(), "masterhand-store-"))
+    const store = createSqliteStore(join(dir, "test.sqlite"))
+    try {
+      store.assignPreviewPort({ sessionID: "ses_1", port: 3200, createdAt: 1 })
+      store.assignPreviewPort({ sessionID: "ses_2", port: 3201, createdAt: 2 })
+
+      expect(store.getPreviewPort("ses_1")).toBe(3200)
+      expect(store.listPreviewPorts().map((record) => record.sessionID)).toEqual(["ses_1", "ses_2"])
+
+      store.removePreviewPort("ses_1")
+      expect(store.getPreviewPort("ses_1")).toBeNull()
+      expect(store.listPreviewPorts()).toHaveLength(1)
+    } finally {
+      store.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("behaves the same in memory", () => {
+    const store = createMemoryStore()
+    store.assignPreviewPort({ sessionID: "ses_1", port: 3200, createdAt: 1 })
+    expect(store.getPreviewPort("ses_1")).toBe(3200)
+    store.removePreviewPort("ses_1")
+    expect(store.getPreviewPort("ses_1")).toBeNull()
+  })
+})

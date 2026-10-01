@@ -41,7 +41,57 @@ describe("opencode proxy", () => {
 
     const proxied = upstream.requests.find((request) => request.path.includes("prompt_async"))
     expect(proxied).toBeDefined()
+    const forwarded = JSON.parse(proxied?.body ?? "{}") as { parts: unknown; system?: string }
+    expect(forwarded.parts).toEqual([{ type: "text", text: "hello" }])
+    // The reserved preview port is appended to the prompt without touching parts.
+    expect(forwarded.system).toContain("0.0.0.0")
+  })
+
+  it("appends the preview instruction to an existing system prompt", async () => {
+    upstream = await startMockOpencode()
+    app = await startTestApp({ config: { opencodeUrl: upstream.url } })
+    const cookie = await login(app.url)
+
+    await fetch(`${app.url}/api/oc/session/ses_7/message`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text: "hi" }], system: "Be terse." }),
+    })
+
+    const proxied = upstream.requests.find((request) => request.path.includes("/message"))
+    const forwarded = JSON.parse(proxied?.body ?? "{}") as { system: string }
+    expect(forwarded.system.startsWith("Be terse.\n")).toBe(true)
+    expect(forwarded.system).toContain("0.0.0.0")
+  })
+
+  it("leaves prompts untouched when previews are disabled", async () => {
+    upstream = await startMockOpencode()
+    app = await startTestApp({ config: { opencodeUrl: upstream.url, previewEnabled: false } })
+    const cookie = await login(app.url)
+
+    await fetch(`${app.url}/api/oc/session/ses_8/prompt_async`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text: "hello" }] }),
+    })
+
+    const proxied = upstream.requests.find((request) => request.path.includes("prompt_async"))
     expect(JSON.parse(proxied?.body ?? "{}")).toEqual({ parts: [{ type: "text", text: "hello" }] })
+  })
+
+  it("does not inject into non-prompt endpoints", async () => {
+    upstream = await startMockOpencode()
+    app = await startTestApp({ config: { opencodeUrl: upstream.url } })
+    const cookie = await login(app.url)
+
+    await fetch(`${app.url}/api/oc/session/ses_9/permissions/perm_1`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ response: "once" }),
+    })
+
+    const proxied = upstream.requests.find((request) => request.path.includes("permissions"))
+    expect(JSON.parse(proxied?.body ?? "{}")).toEqual({ response: "once" })
   })
 
   it("forwards the x-opencode-directory header on mutations", async () => {

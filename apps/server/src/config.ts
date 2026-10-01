@@ -7,6 +7,11 @@ function fromRepoRoot(value: string | undefined, fallback: string): string {
   return resolve(repoRoot, value?.trim() || fallback)
 }
 
+export interface PreviewPortRange {
+  min: number
+  max: number
+}
+
 export interface Config {
   port: number
   opencodeUrl: string
@@ -25,6 +30,14 @@ export interface Config {
   /** Author used for commits MasterHand creates in isolated worktrees. */
   gitUserName: string
   gitUserEmail: string
+  /** Enables the Cloudflare quick-tunnel preview feature. */
+  previewEnabled: boolean
+  /** Host (no port) where the agent's dev server listens, as seen by the tunnel. */
+  previewOrigin: string
+  /** Inclusive port pool reserved for session previews. */
+  previewPortRange: PreviewPortRange
+  /** `cloudflared` executable name or path. */
+  cloudflaredBin: string
 }
 
 function intFromEnv(value: string | undefined, fallback: number): number {
@@ -42,6 +55,27 @@ function listFromEnv(value: string | undefined): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+const DEFAULT_PREVIEW_PORT_RANGE: PreviewPortRange = { min: 3200, max: 3299 }
+
+function portRangeFromEnv(value: string | undefined, fallback = DEFAULT_PREVIEW_PORT_RANGE): PreviewPortRange {
+  const match = /^\s*(\d{1,5})\s*-\s*(\d{1,5})\s*$/.exec(value ?? "")
+  if (!match) return fallback
+  const min = Number.parseInt(match[1]!, 10)
+  const max = Number.parseInt(match[2]!, 10)
+  const valid = (port: number) => port >= 1024 && port <= 65535
+  if (!valid(min) || !valid(max) || min > max) return fallback
+  return { min, max }
+}
+
+/** Host of a URL (no port); used for the tunnel origin when it is not set. */
+function hostFromUrl(value: string, fallback: string): string {
+  try {
+    return new URL(value).hostname || fallback
+  } catch {
+    return fallback
+  }
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -67,9 +101,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   const workspacesRoot = fromRepoRoot(env.WORKSPACES_ROOT, "workspace")
+  const opencodeUrl = env.OPENCODE_URL ?? "http://127.0.0.1:4096"
   return {
     port: intFromEnv(env.PORT, 8787),
-    opencodeUrl: env.OPENCODE_URL ?? "http://127.0.0.1:4096",
+    opencodeUrl,
     opencodeAuth,
     masterhandPassword,
     sessionSecret,
@@ -85,5 +120,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       : resolve(workspacesRoot, ".worktrees"),
     gitUserName: env.GIT_COMMIT_NAME?.trim() || "MasterHand",
     gitUserEmail: env.GIT_COMMIT_EMAIL?.trim() || "masterhand@localhost",
+    previewEnabled: boolFromEnv(env.PREVIEW_ENABLED, true),
+    // In Docker the tunnel targets the opencode container by service name; in
+    // development both processes run on the host.
+    previewOrigin: env.PREVIEW_ORIGIN?.trim() || hostFromUrl(opencodeUrl, "127.0.0.1"),
+    previewPortRange: portRangeFromEnv(env.PREVIEW_PORT_RANGE),
+    cloudflaredBin: env.CLOUDFLARED_BIN?.trim() || "cloudflared",
   }
 }

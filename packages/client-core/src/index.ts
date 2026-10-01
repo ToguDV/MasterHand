@@ -44,6 +44,7 @@ export {
   useConfig,
   useEventStream,
   useMessages,
+  usePreview,
   useProviders,
   useSessionDirectories,
   useSessionStatuses,

@@ -33,11 +33,18 @@ ENV NODE_ENV=production
 ENV DATA_DIR=/data
 WORKDIR /app
 
+# cloudflared powers session previews (Cloudflare quick tunnels). Pin the
+# version; override CLOUDFLARED_VERSION at build time to upgrade.
+ARG CLOUDFLARED_VERSION=2026.9.3
+
 # git is required for isolated sessions (git worktrees); gh is optional and only
 # used to open pull requests when it is authenticated (otherwise MasterHand
 # hands back a compare URL). glab can be added by extending this image.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git gh ca-certificates \
+  && apt-get install -y --no-install-recommends git gh ca-certificates curl \
+  && curl -fsSL -o /usr/local/bin/cloudflared \
+    "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-$(dpkg --print-architecture)" \
+  && chmod +x /usr/local/bin/cloudflared \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /data && chown node:node /data \
   # The bind-mounted workspace may be owned by a different host uid; git would

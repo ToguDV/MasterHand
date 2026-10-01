@@ -5,6 +5,7 @@ import { serveStatic } from "@hono/node-server/serve-static"
 import { createApp } from "./app.js"
 import { loadConfig } from "./config.js"
 import { createEventHub } from "./events.js"
+import { createPreviewManager } from "./preview.js"
 import { createSqliteStore } from "./store.js"
 import { createWorktreeManager, reconcileWorktrees } from "./worktrees.js"
 
@@ -23,6 +24,8 @@ const worktrees = createWorktreeManager({
   userEmail: config.gitUserEmail,
 })
 
+const preview = createPreviewManager({ config, store })
+
 try {
   const reconciled = reconcileWorktrees(store, worktrees, config.worktreesRoot)
   if (reconciled.droppedRecords.length || reconciled.removedWorktrees.length) {
@@ -34,7 +37,7 @@ try {
   console.warn("[masterhand] worktree reconciliation skipped:", error)
 }
 
-const app = createApp({ config, store, hub, worktrees })
+const app = createApp({ config, store, hub, worktrees, preview })
 
 if (config.webDist && existsSync(config.webDist)) {
   const webDist = config.webDist
@@ -54,6 +57,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
 })
 
 function shutdown(): void {
+  preview.stopAll()
   hub.stop()
   store.close()
   server.close(() => process.exit(0))

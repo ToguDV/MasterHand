@@ -128,6 +128,17 @@ Several agents working in the same workspace share its folder, so they can overw
 5. Deleting the session (or its workspace) removes the worktree and the branch and drops the record. A startup reconciliation drops records whose folder disappeared and removes orphan worktrees under the root.
 6. Clients show an isolated toggle at creation, a branch badge per session, an All/Isolated/Standard filter and the worktree bar with the Finish action.
 
+### 4.8 Session previews (Cloudflare quick tunnels)
+
+The agent usually runs a web project's dev server inside its own process/container, whose port the user's browser cannot reach. **Previews** expose it without publishing any port:
+
+1. On first use, the BFF reserves a **fixed port** per session from `PREVIEW_PORT_RANGE` (persisted in the `preview_ports` table). Fixed ports survive BFF restarts and let a running dev server be re-exposed without restarting it. The allocator recycles the oldest mapping without a live tunnel when the pool is drained.
+2. While previews are enabled, the `/api/oc` proxy appends a `system` instruction to every prompt of that session (opencode merges `system` into the model's system prompt — verified against v1.18.34), telling the agent to bind any web server to `0.0.0.0:<port>`. No project files (`AGENTS.md`, `opencode.json`) are touched.
+3. On an explicit **Start**, the BFF probes `PREVIEW_ORIGIN:<port>` over TCP and then spawns `cloudflared tunnel --no-autoupdate --url http://<origin>:<port>` inside the BFF container, capturing the random `https://<name>.trycloudflare.com` URL from its output. The URL is served to clients, which embed it in an iframe (web/desktop) or a WebView (mobile). **Stop** kills the process; session deletion and BFF shutdown clean up too.
+4. `PREVIEW_ORIGIN` is the host of the dev server as seen by the BFF: `opencode` on the Compose network, `127.0.0.1` in native dev. The quick tunnel makes an **outbound** connection to Cloudflare, so no inbound ports or DNS/certificates are needed.
+
+Quick tunnels are **public and ephemeral** (random URL per start, no authentication at the edge): an explicit testing feature, not a production hosting path. See the Risks table.
+
 ## 5. Security model
 
 | Layer | Measure |
@@ -162,6 +173,7 @@ deploy/
 - Provider authentication: `docker compose run --rm opencode auth login` (persists to a volume).
 - Agents work under `./workspace` (bind mount) so files can be inspected/versioned from the host; the BFF creates one subfolder per workspace there and per-session git worktrees under `.worktrees/` (same mount, so opencode sees them).
 - Backups: volumes `masterhand_data`, `opencode_data` and `opencode_config`.
+- Session previews: the `masterhand` image bundles `cloudflared`; Compose sets `PREVIEW_ORIGIN=opencode`, so the tunnel targets the dev server inside the opencode container. The BFF needs **outbound Internet** and the agent must bind the reserved port to `0.0.0.0`. Set `PREVIEW_ENABLED=false` to disable the feature.
 - Upgrade: opencode pinned; `docker compose build && docker compose up -d`.
 - See `docs/runbooks/deployment.md` for concrete TLS options.
 
@@ -181,12 +193,15 @@ deploy/
 | ADR-10 | Adopt the YAGNI ladder as a written guideline in `AGENTS.md`; do not install the third-party `ponytail` plugin | Keeps the minimalism principle without an always-on external prompt that would fight documented decisions or alter subagent behavior | Installing the `ponytail` plugin (third-party supply chain, injects rules into every turn and subagent, conflicts with the spec-driven approach) |
 | ADR-11 | Workspaces are subfolders MasterHand creates under a single configured root; the BFF owns the records and the folders, and opencode is targeted per request with its `directory` override | opencode has no project-deletion endpoint, so a deletable "workspace" must be owned by MasterHand; deriving the path from a sanitized name keeps every project isolated under one root and removes unsafe absolute paths | Registering arbitrary existing absolute paths (escapes the root, requires the user to pre-create folders), listing `GET /project` directly (no deletion possible), opencode's experimental v2 workspaces (git worktrees, not folders, unstable) |
 | ADR-12 | Isolated sessions use BFF-managed git worktrees, opt-in per session, with a branch per session and an explicit Finish & PR action (no auto-merge) | Git worktrees are the natural way to give concurrent agents disjoint files; the BFF already owns workspaces and opencode accepts a per-request `directory`, so no unstable opencode API is needed. Opt-in avoids a worktree/branch per throwaway session, and a manual finish avoids surprising merges | Automatic worktree per session (branch/disk bloat), one workspace per session (no merge path, manual), opencode v2 worktree/workspace API (experimental, not in the pinned version), per-workspace lock (kills parallelism) |
+| ADR-13 | Previews use Cloudflare quick tunnels managed by the BFF, with a fixed reserved port injected per session through the prompt's `system` field and an explicit Start/Stop | Quick tunnels need no DNS, certificates or published ports and work from any network (web, desktop and native clients), which is exactly the "show me the dev server" use case. A fixed per-session port survives restarts and lets the agent be told once, while the BFF stays the only process managing the tunnel. | BFF reverse proxy with path prefixes (breaks absolute asset paths and HMR), wildcard preview subdomain (requires deployer DNS/TLS work), publishing host ports (mixed content, exposed surface), named tunnels (account/API token) |
+| ADR-14 | Prompt preview instructions are injected by the BFF as the per-prompt `system` field, not by editing workspace files | The port is per session (isolated worktrees run concurrently), and `system` is merged (not replaced) by opencode, so it composes with the user's own prompt and leaves the project's files untouched | Writing `AGENTS.md`/`opencode.json` into the workspace (mutates user files, per-workspace not per-session), client-side injection (duplicated in every client) |
 
 ## 8. Risks
 
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Poorly secured public exposure | Critical (RCE) | BFF with auth, rate limit, opencode on the internal network only, `ask` permissions, unprivileged containers |
+| Public preview tunnel | High (data exposure) | Quick tunnels are opt-in per session and explicitly for testing; the random URL is unknown until started, and `PREVIEW_ENABLED=false` disables the feature server-wide. Previews are never for production data |
 | SSE drops on mobile/background | High (stale UI) | Refetch + dedupe by `part.id`, fallback polling |
 | Missing native push reduces awareness | Medium | In-app notifications plus a visible connection status; native push in the backlog |
 | SSE streaming from React Native | Medium | Mobile uses `expo/fetch` (streaming-capable) as the fetch implementation; polling is the fallback |

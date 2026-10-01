@@ -6,6 +6,7 @@ const e2eDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(e2eDir, "..")
 
 const MOCK_PORT = 4097
+const MOCK_PREVIEW_PORT = 32950
 const BFF_PORT = 8788
 
 export default defineConfig({
@@ -27,7 +28,7 @@ export default defineConfig({
     {
       command: "npx tsx mock-opencode.ts",
       cwd: e2eDir,
-      env: { MOCK_PORT: String(MOCK_PORT) },
+      env: { MOCK_PORT: String(MOCK_PORT), MOCK_PREVIEW_PORT: String(MOCK_PREVIEW_PORT) },
       url: `http://127.0.0.1:${MOCK_PORT}/global/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
@@ -43,6 +44,9 @@ export default defineConfig({
         COOKIE_SECURE: "false",
         DATA_DIR: "/tmp/masterhand-e2e",
         WORKSPACES_ROOT: "/tmp/masterhand-e2e-workspace",
+        PREVIEW_ORIGIN: "127.0.0.1",
+        PREVIEW_PORT_RANGE: `${MOCK_PREVIEW_PORT}-${MOCK_PREVIEW_PORT}`,
+        CLOUDFLARED_BIN: path.join(e2eDir, "fake-cloudflared.sh"),
       },
       url: `http://127.0.0.1:${BFF_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,

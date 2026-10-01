@@ -3,6 +3,7 @@ import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-nati
 import { useQueryClient } from "@tanstack/react-query"
 import {
   sessionUsage,
+  useBffStatus,
   useMessages,
   type Client,
   type FinishSessionResult,
@@ -11,6 +12,7 @@ import {
 } from "@masterhand/client-core"
 import { Composer } from "../components/Composer"
 import { MessageBubble } from "../components/MessageBubble"
+import { PreviewModal } from "../components/PreviewModal"
 import { Screen } from "../components/Screen"
 import { colors } from "../theme"
 
@@ -43,6 +45,8 @@ export function ChatScreen({
 }) {
   const queryClient = useQueryClient()
   const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
+  const statusQuery = useBffStatus(client)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const listRef = useRef<FlatList<MessageWithParts>>(null)
   const [finishing, setFinishing] = useState(false)
   const [finishResult, setFinishResult] = useState<FinishSessionResult | null>(null)
@@ -74,6 +78,11 @@ export function ChatScreen({
         <Text style={styles.title} numberOfLines={1}>
           {title || "Session"}
         </Text>
+        {statusQuery.data?.preview?.enabled && statusQuery.data.preview.available ? (
+          <Pressable style={styles.previewButton} onPress={() => setPreviewOpen(true)}>
+            <Text style={styles.previewButtonText}>Preview</Text>
+          </Pressable>
+        ) : null}
         <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.warning }]} />
       </View>
 
@@ -155,6 +164,10 @@ export function ChatScreen({
           </Pressable>
         </View>
       ) : null}
+
+      {previewOpen ? (
+        <PreviewModal client={client} sessionID={sessionID} onClose={() => setPreviewOpen(false)} />
+      ) : null}
     </Screen>
   )
 }
@@ -187,6 +200,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  previewButton: {
+    backgroundColor: "rgba(99, 102, 241, 0.15)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accentMuted,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  previewButtonText: {
+    color: "#a5b4fc",
+    fontSize: 12,
+    fontWeight: "700",
   },
   listContainer: {
     flex: 1,

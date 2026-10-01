@@ -90,4 +90,37 @@ describe("loadConfig", () => {
     const prod = loadConfig(env({ NODE_ENV: "production" }))
     expect(prod.allowedOrigins).not.toContain("http://localhost:5173")
   })
+
+  it("applies the preview defaults and derives the tunnel origin from opencode", () => {
+    const config = loadConfig(env())
+    expect(config.previewEnabled).toBe(true)
+    expect(config.previewOrigin).toBe("127.0.0.1")
+    expect(config.previewPortRange).toEqual({ min: 3200, max: 3299 })
+    expect(config.cloudflaredBin).toBe("cloudflared")
+
+    const docker = loadConfig(env({ OPENCODE_URL: "http://opencode:4096" }))
+    expect(docker.previewOrigin).toBe("opencode")
+  })
+
+  it("parses preview overrides", () => {
+    const config = loadConfig(
+      env({
+        PREVIEW_ENABLED: "false",
+        PREVIEW_ORIGIN: " 10.0.0.5 ",
+        PREVIEW_PORT_RANGE: " 4000 - 4009 ",
+        CLOUDFLARED_BIN: "/usr/local/bin/cloudflared",
+      }),
+    )
+    expect(config.previewEnabled).toBe(false)
+    expect(config.previewOrigin).toBe("10.0.0.5")
+    expect(config.previewPortRange).toEqual({ min: 4000, max: 4009 })
+    expect(config.cloudflaredBin).toBe("/usr/local/bin/cloudflared")
+  })
+
+  it("falls back to the default preview port range when it is invalid", () => {
+    expect(loadConfig(env({ PREVIEW_PORT_RANGE: "nope" })).previewPortRange).toEqual({ min: 3200, max: 3299 })
+    expect(loadConfig(env({ PREVIEW_PORT_RANGE: "4000-3000" })).previewPortRange).toEqual({ min: 3200, max: 3299 })
+    expect(loadConfig(env({ PREVIEW_PORT_RANGE: "80-90" })).previewPortRange).toEqual({ min: 3200, max: 3299 })
+    expect(loadConfig(env({ PREVIEW_PORT_RANGE: "70000-80000" })).previewPortRange).toEqual({ min: 3200, max: 3299 })
+  })
 })

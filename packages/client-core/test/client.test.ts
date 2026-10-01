@@ -267,6 +267,27 @@ describe("workspaces", () => {
   })
 })
 
+describe("previews", () => {
+  it("reads, starts and stops a session preview", async () => {
+    const preview = { status: "running", url: "https://x.trycloudflare.com", port: 3200, error: null }
+    const { calls, fetchImpl } = recordingFetch(() =>
+      jsonResponse({ preview }),
+    )
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.preview("ses/1")).toEqual(preview)
+    expect(await client.api.startPreview("ses/1")).toEqual(preview)
+    await client.api.stopPreview("ses/1")
+
+    const routes = calls.map((call) => `${call.init?.method ?? "GET"} ${call.url}`)
+    expect(routes).toEqual([
+      "GET https://mh.example/api/sessions/ses%2F1/preview",
+      "POST https://mh.example/api/sessions/ses%2F1/preview",
+      "DELETE https://mh.example/api/sessions/ses%2F1/preview",
+    ])
+  })
+})
+
 describe("client error handling", () => {
   it("falls back to the HTTP status when the error body is empty", async () => {
     const { fetchImpl } = recordingFetch(() => new Response("", { status: 500 }))

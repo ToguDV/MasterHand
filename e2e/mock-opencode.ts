@@ -422,3 +422,15 @@ const server = createServer((req, res) => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`[mock-opencode] listening on http://127.0.0.1:${port}`)
 })
+
+// Optional dev-server stand-in so preview tests can pass the BFF's reachability
+// probe without running a real web server.
+const previewPort = Number(process.env.MOCK_PREVIEW_PORT ?? "")
+if (Number.isFinite(previewPort) && previewPort > 0) {
+  createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" })
+    res.end("<!doctype html><h1>Preview</h1>")
+  }).listen(previewPort, "127.0.0.1", () => {
+    console.log(`[mock-opencode] fake dev server on http://127.0.0.1:${previewPort}`)
+  })
+}

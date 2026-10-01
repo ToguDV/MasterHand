@@ -42,6 +42,7 @@ One user: the owner of the instance (single-user, multi-device). No teams, roles
 | FR-7 | Resilience | SSE reconnection with message refetch and deduplication by `part.id`; the UI never stays inconsistent after losing connection or returning from background |
 | FR-8 | Health | Status indicator for the BFF and the opencode connection |
 | FR-9 | Self-hosting | Generic configuration (no hardcoded domain); deployer provides the reverse proxy and TLS |
+| FR-10 | Previews | Preview any web project the agent runs: a fixed port is reserved per session and exposed through a Cloudflare quick tunnel with explicit Start/Stop, embedded in the web/desktop UI and the mobile app. Public and ephemeral by design; for testing only, never for production data |
 
 ## 6. Non-functional requirements
 
@@ -61,7 +62,7 @@ One user: the owner of the instance (single-user, multi-device). No teams, roles
 - Native push notifications (FCM/APNs) — in-app SSE notifications only for now.
 - PWA / service worker / installable web app.
 - Terminal in the browser.
-- Dev-server previews and advanced visual diffs.
+- Advanced visual diffs.
 - Multi-run, session goals, walkthroughs, GitHub workflows, scheduling.
 - Multi-user, teams, roles and per-user permissions.
 - Agent sandbox/container isolation (evaluated post-MVP).

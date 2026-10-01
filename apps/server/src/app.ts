@@ -16,6 +16,7 @@ import {
 } from "./auth.js"
 import type { Config } from "./config.js"
 import type { EventHub } from "./events.js"
+import { createPreviewManager, PreviewError, type PreviewManager } from "./preview.js"
 import { createOpencodeProxy } from "./proxy.js"
 import type { IsolatedSessionRecord, Store } from "./store.js"
 import {
@@ -43,6 +44,8 @@ export interface AppDeps {
   removeDir?: (path: string) => void
   /** Overridable for tests: git worktree operations. */
   worktrees?: WorktreeManager
+  /** Overridable for tests: Cloudflare quick-tunnel previews. */
+  preview?: PreviewManager
 }
 
 const KEEPALIVE_MS = 25_000
@@ -88,6 +91,7 @@ export function createApp(deps: AppDeps): Hono {
       userName: config.gitUserName,
       userEmail: config.gitUserEmail,
     })
+  const preview = deps.preview ?? createPreviewManager({ config, store: deps.store })
 
   /**
    * Calls opencode directly (injecting basic auth). The `directory` override
@@ -188,22 +192,34 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   app.use("/api/oc/*", requireAuth(config, deps.store))
-  app.all("/api/oc/*", createOpencodeProxy(config, fetchImpl))
+  app.all(
+    "/api/oc/*",
+    createOpencodeProxy(config, fetchImpl, { preview: config.previewEnabled ? preview : undefined }),
+  )
 
   const api = new Hono()
   api.use("*", requireAuth(config, deps.store))
 
   api.get("/status", async (c) => {
+    const previewStatus = {
+      enabled: config.previewEnabled,
+      available: config.previewEnabled && preview.available(),
+      portRange: config.previewPortRange,
+    }
     try {
       const health = await fetchImpl(new URL("/global/health", config.opencodeUrl), {
         headers: config.opencodeAuth ? { authorization: config.opencodeAuth } : {},
         signal: AbortSignal.timeout(3000),
       })
-      if (!health.ok) return c.json({ ok: true, opencode: { healthy: false } })
+      if (!health.ok) return c.json({ ok: true, opencode: { healthy: false }, preview: previewStatus })
       const data = (await health.json()) as { healthy?: boolean; version?: string }
-      return c.json({ ok: true, opencode: { healthy: data.healthy === true, version: data.version } })
+      return c.json({
+        ok: true,
+        opencode: { healthy: data.healthy === true, version: data.version },
+        preview: previewStatus,
+      })
     } catch {
-      return c.json({ ok: true, opencode: { healthy: false } })
+      return c.json({ ok: true, opencode: { healthy: false }, preview: previewStatus })
     }
   })
 
@@ -283,6 +299,7 @@ export function createApp(deps: AppDeps): Hono {
         // best effort: the folder may already be gone
       }
       deps.store.removeIsolatedSession(record.sessionID)
+      preview.forget(record.sessionID)
     }
 
     if (c.req.query("deleteFiles") === "1") {
@@ -446,6 +463,7 @@ export function createApp(deps: AppDeps): Hono {
       }
       deps.store.removeIsolatedSession(sessionID)
     }
+    preview.forget(sessionID)
     return c.json({ ok: true })
   })
 
@@ -494,6 +512,29 @@ export function createApp(deps: AppDeps): Hono {
       path: record.path,
       error: pushError,
     })
+  })
+
+  api.get("/sessions/:sessionID/preview", (c) => {
+    if (!config.previewEnabled) return c.json({ error: "preview_disabled" }, 404)
+    return c.json({ preview: preview.status(c.req.param("sessionID")) })
+  })
+
+  api.post("/sessions/:sessionID/preview", async (c) => {
+    if (!config.previewEnabled) return c.json({ error: "preview_disabled" }, 404)
+    if (!preview.available()) return c.json({ error: "preview_unavailable" }, 503)
+    try {
+      return c.json({ preview: await preview.start(c.req.param("sessionID")) })
+    } catch (error) {
+      const code = error instanceof PreviewError ? error.code : "preview_failed"
+      const status = code === "preview_not_running" ? 409 : code === "preview_ports_exhausted" ? 503 : 502
+      return c.json({ error: code, detail: error instanceof Error ? error.message : undefined }, status)
+    }
+  })
+
+  api.delete("/sessions/:sessionID/preview", (c) => {
+    if (!config.previewEnabled) return c.json({ error: "preview_disabled" }, 404)
+    preview.stop(c.req.param("sessionID"))
+    return c.json({ ok: true })
   })
 
   app.route("/api", api)
