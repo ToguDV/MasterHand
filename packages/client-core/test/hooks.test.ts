@@ -71,6 +71,35 @@ describe("createEventHandler", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions })
   })
 
+  it("recovers missed state when opencode (re)connects", () => {
+    const { qc, invalidate } = makeQueryClient()
+    const handler = createEventHandler(qc)
+    emit(handler, "server.connected", {})
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["messages"] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.statuses })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+  })
+
+  it("coalesces catalog refreshes when opencode hot-reloads them", () => {
+    vi.useFakeTimers()
+    try {
+      const { qc, invalidate } = makeQueryClient()
+      const handler = createEventHandler(qc)
+      for (const type of ["agent.updated", "model.updated", "provider.updated", "models-dev.refreshed"]) {
+        emit(handler, type, {})
+      }
+      expect(invalidate).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(250)
+      expect(invalidate).toHaveBeenCalledTimes(2)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("caches session.status updates, tolerating an empty cache", () => {
     const { qc } = makeQueryClient()
     const handler = createEventHandler(qc)
@@ -488,7 +517,6 @@ describe("createEventHandler", () => {
     handler("nope")
     handler(undefined)
     emit(handler, "unknown.event", {})
-    emit(handler, "server.connected", {})
     expect(invalidate).not.toHaveBeenCalled()
     expect(onPermission).not.toHaveBeenCalled()
   })
