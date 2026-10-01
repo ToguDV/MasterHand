@@ -151,3 +151,12 @@ curl -s -u "opencode:$OPENCODE_SERVER_PASSWORD" http://127.0.0.1:4096/api/experi
 `GET /api/experimental/migration/v1` returns the migration status (`required`, `running`, `done`, …). Sessions and history appear in MasterHand once it reports done; check `docker compose logs opencode` if it fails.
 
 Back up the volumes `masterhand_data`, `opencode_data` and `opencode_config` regularly (not only when upgrading).
+
+## 8. Troubleshooting: opencode credentials
+
+MasterHand's BFF and `opencode serve` must share the same `OPENCODE_SERVER_PASSWORD`. opencode v2 always protects its API: when started without that env var it generates a password and prints `server password <value>`.
+
+- **Docker:** Compose passes `OPENCODE_SERVER_PASSWORD` to the `opencode` service and the BFF reads the same value from `deploy/.env`. Set it once there.
+- **Native development:** `npm run dev:*` starts opencode itself with the environment from `apps/server/.env.local` and, when no password is configured, generates one shared by both processes. If you start opencode yourself, give the BFF the same value (export it or set it in `apps/server/.env.local`) and restart both; the dev script probes a reused opencode and warns on a mismatch.
+
+Symptoms of a mismatch: every conversation shows a red `opencode rejected MasterHand's credentials…` message, a banner under the header repeats the hint, the sessions list is empty and `/api/status` returns `opencode: { healthy: false, error: "unauthorized" }`. Fix the password and restart both processes (a BFF restart is required: it reads the password at boot).

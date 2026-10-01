@@ -370,6 +370,20 @@ export default function App() {
         </button>
       )}
 
+      {statusQuery.data?.opencode?.error === "unauthorized" && (
+        <div className="border-b border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
+          opencode rejected MasterHand&apos;s credentials. MasterHand and opencode must share
+          OPENCODE_SERVER_PASSWORD: set it in apps/server/.env.local (or unset it in opencode), then
+          restart both.
+        </div>
+      )}
+
+      {statusQuery.data?.opencode?.error === "unreachable" && (
+        <div className="border-b border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
+          opencode is not reachable. Is its server running?
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <aside
           className={`${sessionID ? "hidden md:flex" : "flex"} w-full min-h-0 flex-col border-r border-zinc-800 md:w-72 md:shrink-0`}

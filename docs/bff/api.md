@@ -33,7 +33,7 @@ Other rules:
 
 | Method | Route | Response | Notes |
 |---|---|---|---|
-| `GET` | `/api/status` | `{ ok: true, opencode: { healthy, version? }, preview: { enabled, available, portRange } }` | Calls opencode's `/api/info` with a 3s timeout; on failure returns `healthy: false`. `preview.available` reports whether the `cloudflared` binary can be executed |
+| `GET` | `/api/status` | `{ ok: true, opencode: { healthy, version?, error? }, preview: { enabled, available, portRange } }` | Calls opencode's `/api/info` with a 3s timeout; on failure returns `healthy: false` plus `error: "unauthorized"` (opencode rejected the BFF credentials) or `"unreachable"`. `preview.available` reports whether the `cloudflared` binary can be executed |
 | `GET` | `/api/events` | SSE | Re-emits opencode v2 events from **all locations** (hub on `/api/event`); first event `hello` with `{ connected }`; `ping` every 25s |
 | `GET` | `/api/devices` | `{ devices: DeviceRecord[] }` | Lists registered devices |
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
@@ -65,7 +65,7 @@ Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on session creation
 
 | Method | Route | Notes |
 |---|---|---|
-| `*` | `/api/oc/*` | Forwards to `OPENCODE_URL` (e.g. `http://opencode:4096`) injecting `Authorization: Basic` with `OPENCODE_SERVER_PASSWORD`. The `/api/oc` prefix is removed: `/api/oc/api/info` → `GET /api/info`. Preserves method, body, query and `content-type` byte-for-byte (including the `location[directory]` query used to target a workspace). SSE streaming without buffering (`cache-control: no-cache`, `x-accel-buffering: no`). `502` if opencode does not answer. |
+| `*` | `/api/oc/*` | Forwards to `OPENCODE_URL` (e.g. `http://opencode:4096`) injecting `Authorization: Basic` with `OPENCODE_SERVER_PASSWORD`. The `/api/oc` prefix is removed: `/api/oc/api/info` → `GET /api/info`. Preserves method, body, query and `content-type` byte-for-byte (including the `location[directory]` query used to target a workspace). An opencode `401/403` is converted into `502 { error: "opencode_unauthorized" }` instead of being relayed (relaying it would sign the MasterHand user out). SSE streaming without buffering (`cache-control: no-cache`, `x-accel-buffering: no`). `502 opencode_unreachable` if opencode does not answer. |
 
 Examples:
 

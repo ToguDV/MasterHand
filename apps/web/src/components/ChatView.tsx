@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
+  conversationErrorMessage,
   sessionUsage,
   useMessages,
   type FinishSessionResult,
@@ -76,7 +77,7 @@ export function ChatView({
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
           {messagesQuery.isLoading && <p className="text-center text-sm text-zinc-500">Loading conversation…</p>}
           {messagesQuery.error && (
-            <p className="text-center text-sm text-red-400">Could not load the conversation</p>
+            <p className="text-center text-sm text-red-400">{conversationErrorMessage(messagesQuery.error)}</p>
           )}
           {!messagesQuery.isLoading && messages.length === 0 && (
             <p className="py-12 text-center text-sm text-zinc-500">

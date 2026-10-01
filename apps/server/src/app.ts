@@ -246,7 +246,10 @@ export function createApp(deps: AppDeps): Hono {
         headers: config.opencodeAuth ? { authorization: config.opencodeAuth } : {},
         signal: AbortSignal.timeout(3000),
       })
-      if (!health.ok) return c.json({ ok: true, opencode: { healthy: false }, preview: previewStatus })
+      if (!health.ok) {
+        const error = health.status === 401 || health.status === 403 ? "unauthorized" : "unreachable"
+        return c.json({ ok: true, opencode: { healthy: false, error }, preview: previewStatus })
+      }
       const data = (await health.json()) as { version?: string }
       return c.json({
         ok: true,
@@ -254,7 +257,7 @@ export function createApp(deps: AppDeps): Hono {
         preview: previewStatus,
       })
     } catch {
-      return c.json({ ok: true, opencode: { healthy: false }, preview: previewStatus })
+      return c.json({ ok: true, opencode: { healthy: false, error: "unreachable" }, preview: previewStatus })
     }
   })
 

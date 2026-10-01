@@ -46,6 +46,12 @@ export function createOpencodeProxy(config: Config, fetchImpl: typeof fetch = fe
       return c.json({ error: "opencode_unreachable" }, 502)
     }
 
+    // opencode rejected the BFF credentials: surface an actionable error and
+    // never relay its 401 (it would sign the user out of MasterHand).
+    if (upstream.status === 401 || upstream.status === 403) {
+      return c.json({ error: "opencode_unauthorized" }, 502)
+    }
+
     const responseHeaders = new Headers()
     for (const name of FORWARD_RESPONSE_HEADERS) {
       const value = upstream.headers.get(name)

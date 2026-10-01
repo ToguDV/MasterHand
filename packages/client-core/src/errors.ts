@@ -24,6 +24,26 @@ function apiErrorCode(error: ApiError): string | null {
   }
 }
 
+/**
+ * Message shown when a conversation fails to load. Detects the opencode
+ * credential mismatch (the BFF and `opencode serve` must share
+ * `OPENCODE_SERVER_PASSWORD`), the most common setup failure.
+ */
+export function conversationErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const code = apiErrorCode(error)
+    if (code === "opencode_unauthorized") {
+      return "opencode rejected MasterHand's credentials. MasterHand and opencode must share OPENCODE_SERVER_PASSWORD: set it in apps/server/.env.local (or unset it in opencode), then restart both."
+    }
+    if (code === "opencode_unreachable") {
+      return "opencode is not reachable. Is its server running?"
+    }
+    const message = error.message.split("\n")[0]?.trim()
+    if (message && !message.startsWith("{")) return message
+  }
+  return "Could not load the conversation"
+}
+
 /** Human-readable message for a failed preview Start. */
 export function previewErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {

@@ -79,6 +79,27 @@ describe("/api/status", () => {
     const body = (await response.json()) as { preview: { enabled: boolean; available: boolean } }
     expect(body.preview).toEqual({ enabled: false, available: false, portRange: { min: 32900, max: 32999 } })
   })
+
+  it("flags an opencode that rejects the BFF credentials", async () => {
+    const stub: typeof fetch = async () => new Response("unauthorized", { status: 401 })
+    app = await startTestApp({ fetchImpl: stub })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/status`, { headers: { cookie } })
+    expect(await response.json()).toMatchObject({
+      opencode: { healthy: false, error: "unauthorized" },
+    })
+  })
+
+  it("flags an unreachable opencode", async () => {
+    app = await startTestApp({ config: { opencodeUrl: "http://127.0.0.1:1" } })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/status`, { headers: { cookie } })
+    expect(await response.json()).toMatchObject({
+      opencode: { healthy: false, error: "unreachable" },
+    })
+  })
 })
 
 describe("preview routes", () => {

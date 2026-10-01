@@ -97,6 +97,8 @@ export interface BffStatus {
   opencode?: {
     healthy: boolean
     version?: string
+    /** Why opencode is not healthy, when it is not. */
+    error?: "unauthorized" | "unreachable"
   }
   preview?: PreviewAvailability
 }

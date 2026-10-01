@@ -95,6 +95,16 @@ describe("opencode proxy", () => {
     expect(response.status).toBe(502)
   })
 
+  it("maps an opencode 401 to an actionable 502 instead of relaying it", async () => {
+    const stub: typeof fetch = async () => new Response("unauthorized", { status: 401 })
+    app = await startTestApp({ fetchImpl: stub })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/oc/api/session`, { headers: { cookie } })
+    expect(response.status).toBe(502)
+    expect(await response.json()).toEqual({ error: "opencode_unauthorized" })
+  })
+
   it("keeps the upstream origin fixed for protocol-relative paths (SSRF)", async () => {
     const seen: string[] = []
     const stub: typeof fetch = async (input) => {

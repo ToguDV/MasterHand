@@ -48,6 +48,8 @@ npm run dev:stop   # kills the dev orchestrator, BFF/tsx, Vite and opencode list
 
 If `opencode` is not on your `PATH`, install opencode v2 first (`npm install -g @opencode/cli`, or see https://opencode.ai/docs/). MasterHand targets the v2 server API; a v1 binary will not work.
 
+opencode v2 always protects its API with basic auth and generates a password when `OPENCODE_SERVER_PASSWORD` is unset. When `npm run dev:*` starts opencode itself it generates a shared password for both processes, so the default flow just works. If you run opencode yourself, give both the same value: either export `OPENCODE_SERVER_PASSWORD` or set it in `apps/server/.env.local` (which the dev script loads and shares) and restart both. `npm run dev:*` warns when a reused opencode rejects the BFF credentials.
+
 `apps/server/.env.local` is also loaded by `npm run dev:server`'s own `tsx --env-file-if-exists`; it is **not** used by Docker.
 
 To try the web app from a phone on the same network: `npm run dev:web -- --host` and open `http://<your-PC-IP>:5173`. Extra arguments after `--` are forwarded to the front end.

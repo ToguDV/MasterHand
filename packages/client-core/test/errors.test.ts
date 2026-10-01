@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ApiError } from "../src/client"
-import { opencodeErrorMessage, previewErrorMessage } from "../src/errors"
+import { conversationErrorMessage, opencodeErrorMessage, previewErrorMessage } from "../src/errors"
 import type { SessionStructuredError } from "../src/types"
 
 describe("opencodeErrorMessage", () => {
@@ -33,6 +33,29 @@ describe("opencodeErrorMessage", () => {
   it("keeps the original status available on the error payload", () => {
     const error: SessionStructuredError = { type: "ProviderError", message: "boom", status: 503 }
     expect(opencodeErrorMessage(error)).toBe("boom")
+  })
+})
+
+describe("conversationErrorMessage", () => {
+  it("explains the opencode credential mismatch", () => {
+    const message = conversationErrorMessage(new ApiError(502, JSON.stringify({ error: "opencode_unauthorized" })))
+    expect(message).toContain("OPENCODE_SERVER_PASSWORD")
+    expect(message).toContain("restart both")
+  })
+
+  it("explains an unreachable opencode", () => {
+    expect(conversationErrorMessage(new ApiError(502, JSON.stringify({ error: "opencode_unreachable" })))).toContain(
+      "not reachable",
+    )
+  })
+
+  it("surfaces the server message for other API errors", () => {
+    expect(conversationErrorMessage(new ApiError(500, "boom"))).toBe("boom")
+    expect(conversationErrorMessage(new ApiError(500, JSON.stringify({ error: "boom" })))).toBe(
+      "Could not load the conversation",
+    )
+    expect(conversationErrorMessage(new Error("boom"))).toBe("Could not load the conversation")
+    expect(conversationErrorMessage("nope")).toBe("Could not load the conversation")
   })
 })
 
