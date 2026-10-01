@@ -4,7 +4,6 @@ import {
   ApiError,
   createEventHandler,
   invalidateOnReconnect,
-  sessionDirectory,
   useBffStatus,
   useEventStream,
   useSessionDirectories,
@@ -75,11 +74,11 @@ export default function App() {
     answeringRef.current.add(permission.id)
     try {
       await client.api.respondPermission(permission.sessionID, permission.id, "once")
+      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     } catch {
       setBanner("Could not answer the permission request")
     } finally {
       answeringRef.current.delete(permission.id)
-      setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     }
   }, [])
   const answerAutoRef = useRef(answerAuto)
@@ -242,8 +241,6 @@ export default function App() {
   const selected = sessions.find((session) => session.id === sessionID) ?? null
   const parentSessionID = selected?.parentID ?? null
   const busy = sessionID ? statuses[sessionID]?.type === "busy" : false
-  // Isolated sessions run in their worktree; everything else in the workspace.
-  const directory = sessionDirectory(selected, workspacePath)
 
   const handleLogout = useCallback(async () => {
     await client.auth.logout().catch(() => {})
@@ -275,9 +272,8 @@ export default function App() {
   async function deleteSession(id: string) {
     if (!workspaceID) return
     if (!window.confirm("Delete this session and all its data?")) return
-    const target = sessions.find((session) => session.id === id) ?? null
     try {
-      await client.api.sessions.remove(workspaceID, id, sessionDirectory(target, workspacePath))
+      await client.api.sessions.remove(workspaceID, id)
       if (sessionID === id) openSession(null)
       void queryClient.invalidateQueries({ queryKey: ["sessions"] })
       void queryClient.invalidateQueries({ queryKey: ["directories"] })
@@ -315,8 +311,7 @@ export default function App() {
     setResponding(true)
     try {
       // The session id resolves the request regardless of the active workspace.
-      const answered = await client.api.respondPermission(permission.sessionID, permission.id, response)
-      if (answered === false) setBanner("This permission was already answered")
+      await client.api.respondPermission(permission.sessionID, permission.id, response)
       setPermissions((prev) => prev.filter((item) => item.id !== permission.id))
     } catch {
       // Keep the dialog open so the user can retry.
@@ -405,7 +400,7 @@ export default function App() {
               sessionID={sessionID}
               busy={busy}
               connected={connected}
-              directory={directory}
+              workspaceID={workspaceID}
               isolation={selected?.isolation}
               autoAccept={autoAcceptSessions.includes(sessionID)}
               onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}

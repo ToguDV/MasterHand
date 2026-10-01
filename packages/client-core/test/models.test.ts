@@ -8,39 +8,77 @@ import {
   sessionModelValue,
   variantLabel,
 } from "../src/models"
-import type { AgentInfo, ProvidersResponse, Session } from "../src/types"
+import type { AgentInfo, ModelInfo, ModelVariant, ProviderInfo, Session } from "../src/types"
 
-const providers: ProvidersResponse["providers"] = [
-  {
-    id: "zeta",
-    name: "Zeta",
-    models: {
-      "z-model": { id: "z-model", name: "Z Model" },
-      "a-model": { id: "a-model", name: "A Model", variants: { low: {}, high: {} } },
-    },
-  },
-  {
-    id: "alpha",
-    name: "Alpha",
-    models: { m1: { id: "m1", name: "M1", variants: { minimal: {}, max: {} } } },
-  },
-] as unknown as ProvidersResponse["providers"]
+function model(
+  providerID: string,
+  id: string,
+  name: string,
+  overrides: Partial<ModelInfo> = {},
+): ModelInfo {
+  return {
+    id,
+    modelID: id,
+    providerID,
+    name,
+    capabilities: {} as ModelInfo["capabilities"],
+    variants: [],
+    time: { released: 0 },
+    cost: [],
+    status: "active",
+    enabled: true,
+    limit: { context: 0, output: 0 },
+    ...overrides,
+  }
+}
+
+function variant(id: string): ModelVariant {
+  return { id } as ModelVariant
+}
+
+function provider(id: string, name: string): ProviderInfo {
+  return { id, name } as unknown as ProviderInfo
+}
+
+const providers = [provider("zeta", "Zeta"), provider("alpha", "Alpha")]
+
+const models = [
+  model("zeta", "z-model", "Z Model"),
+  model("zeta", "a-model", "A Model", { variants: [variant("low"), variant("high")] }),
+  model("alpha", "m1", "M1", { variants: [variant("minimal"), variant("max")] }),
+]
 
 describe("flattenModels", () => {
-  it("flattens providers and models sorted by label", () => {
-    const options = flattenModels(providers)
+  it("flattens models and providers sorted by label", () => {
+    const options = flattenModels(models, providers)
     expect(options.map((option) => option.value)).toEqual(["alpha/m1", "zeta/a-model", "zeta/z-model"])
     expect(options[0]?.label).toBe("Alpha · M1")
   })
 
   it("exposes each model's variants", () => {
-    const options = flattenModels(providers)
+    const options = flattenModels(models, providers)
     expect(options.find((option) => option.value === "zeta/a-model")?.variants).toEqual(["low", "high"])
     expect(options.find((option) => option.value === "zeta/z-model")?.variants).toEqual([])
   })
 
-  it("tolerates providers without models", () => {
-    expect(flattenModels([])).toEqual([])
+  it("skips disabled models", () => {
+    const options = flattenModels([...models, model("zeta", "off", "Off", { enabled: false })], providers)
+    expect(options.some((option) => option.value === "zeta/off")).toBe(false)
+  })
+
+  it("falls back to the provider id and model id when names are missing", () => {
+    const options = flattenModels(
+      [model("unknown-provider", "raw-id", ""), model("no-name", "named", "Named")],
+      providers,
+    )
+    expect(options.find((option) => option.value === "unknown-provider/raw-id")?.label).toBe(
+      "unknown-provider · raw-id",
+    )
+    expect(options.find((option) => option.value === "no-name/named")?.label).toBe("no-name · Named")
+  })
+
+  it("tolerates empty catalogs", () => {
+    expect(flattenModels([], [])).toEqual([])
   })
 })
 
@@ -57,21 +95,21 @@ describe("variantLabel", () => {
 
   it("capitalizes unknown variants", () => {
     expect(variantLabel("turbo")).toBe("Turbo")
+    expect(variantLabel("HIGH")).toBe("High")
   })
 })
 
 describe("selectableAgents", () => {
   const agents = [
-    { name: "build", mode: "primary" },
-    { name: "plan", mode: "primary" },
-    { name: "explainer", mode: "primary" },
-    { name: "title", mode: "primary", hidden: true },
-    { name: "compaction", mode: "primary", hidden: true },
-    { name: "explore", mode: "subagent" },
+    { id: "build", name: "build", mode: "primary", hidden: false },
+    { id: "plan", name: "plan", mode: "primary", hidden: false },
+    { id: "all", name: "all", mode: "all", hidden: false },
+    { id: "title", name: "title", mode: "primary", hidden: true },
+    { id: "explore", name: "explore", mode: "subagent", hidden: false },
   ] as unknown as AgentInfo[]
 
   it("excludes subagents and hidden agents", () => {
-    expect(selectableAgents(agents).map((agent) => agent.name)).toEqual(["build", "plan", "explainer"])
+    expect(selectableAgents(agents).map((agent) => agent.name)).toEqual(["build", "plan", "all"])
   })
 
   it("tolerates empty lists", () => {
@@ -80,33 +118,35 @@ describe("selectableAgents", () => {
 })
 
 describe("defaultModelValue", () => {
-  const options = flattenModels(providers)
+  const options = flattenModels(models, providers)
+  const defaultModel = model("alpha", "m1", "M1")
 
-  it("prioritizes the config model", () => {
-    expect(defaultModelValue("zeta/a-model", { alpha: "m1" }, options)).toBe("zeta/a-model")
-  })
-
-  it("uses the server default when the config model is unavailable", () => {
-    expect(defaultModelValue("missing/model", { alpha: "m1" }, options)).toBe("alpha/m1")
-  })
-
-  it("falls back to the first available model", () => {
-    expect(defaultModelValue(undefined, {}, options)).toBe("alpha/m1")
-    expect(defaultModelValue(undefined, {}, [])).toBe("")
-  })
-
-  it("prefers the last used model over the config model", () => {
-    expect(defaultModelValue("zeta/a-model", { alpha: "m1" }, options, "zeta/z-model")).toBe("zeta/z-model")
+  it("prefers the last used model when it is still available", () => {
+    expect(defaultModelValue(defaultModel, options, "zeta/z-model")).toBe("zeta/z-model")
   })
 
   it("ignores a preferred model that is no longer available", () => {
-    expect(defaultModelValue("zeta/a-model", {}, options, "missing/model")).toBe("zeta/a-model")
+    expect(defaultModelValue(defaultModel, options, "missing/model")).toBe("alpha/m1")
+  })
+
+  it("uses the server default when there is no preference", () => {
+    expect(defaultModelValue(model("zeta", "a-model", "A Model"), options)).toBe("zeta/a-model")
+  })
+
+  it("falls back to the first available model", () => {
+    expect(defaultModelValue(null, options)).toBe("alpha/m1")
+    expect(defaultModelValue(model("gone", "x", "X"), options)).toBe("alpha/m1")
+  })
+
+  it("returns an empty string without options", () => {
+    expect(defaultModelValue(null, [])).toBe("")
   })
 })
 
 describe("sessionModelValue", () => {
-  const options = flattenModels(providers)
-  const session = (model?: Session["model"]): Session => ({ id: "ses_1", model }) as unknown as Session
+  const options = flattenModels(models, providers)
+  const session = (modelRef?: Session["model"]): Session =>
+    ({ id: "ses_1", model: modelRef }) as unknown as Session
 
   it("returns the session model when available", () => {
     expect(sessionModelValue(session({ providerID: "zeta", id: "z-model" }), options)).toBe("zeta/z-model")
@@ -120,9 +160,12 @@ describe("sessionModelValue", () => {
 })
 
 describe("recentModelValue", () => {
-  const options = flattenModels(providers)
-  const withModel = (id: string, updated: number, model: Session["model"]): Session =>
-    ({ id, time: { created: 0, updated }, model }) as unknown as Session
+  const options = flattenModels(models, providers)
+  const withModel = (id: string, updated: number | undefined, model: Session["model"]): Session => {
+    const session = { id, model } as unknown as Session
+    if (updated !== undefined) (session as { time?: unknown }).time = { created: 0, updated }
+    return session
+  }
 
   it("picks the model of the most recently updated session", () => {
     const sessions = [
@@ -140,6 +183,12 @@ describe("recentModelValue", () => {
     expect(recentModelValue(sessions, options)).toBe("alpha/m1")
   })
 
+  it("treats a missing update timestamp as the oldest", () => {
+    expect(recentModelValue([withModel("a", undefined, { providerID: "zeta", id: "z-model" })], options)).toBe(
+      "zeta/z-model",
+    )
+  })
+
   it("returns undefined when no session has a usable model", () => {
     expect(recentModelValue([], options)).toBeUndefined()
     expect(recentModelValue([withModel("a", 1, undefined)], options)).toBeUndefined()
@@ -147,18 +196,27 @@ describe("recentModelValue", () => {
 })
 
 describe("parseModel", () => {
-  it("splits provider and model", () => {
+  it("splits provider and model id", () => {
     expect(parseModel("anthropic/claude-sonnet-4")).toEqual({
       providerID: "anthropic",
-      modelID: "claude-sonnet-4",
+      id: "claude-sonnet-4",
     })
   })
 
   it("keeps slashes inside the model id", () => {
     expect(parseModel("openrouter/anthropic/claude")).toEqual({
       providerID: "openrouter",
-      modelID: "anthropic/claude",
+      id: "anthropic/claude",
     })
+  })
+
+  it("includes the variant when given", () => {
+    expect(parseModel("anthropic/claude", "high")).toEqual({
+      providerID: "anthropic",
+      id: "claude",
+      variant: "high",
+    })
+    expect(parseModel("anthropic/claude", "")).toEqual({ providerID: "anthropic", id: "claude" })
   })
 
   it("returns undefined without a separator", () => {

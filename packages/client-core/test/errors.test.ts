@@ -1,28 +1,38 @@
 import { describe, expect, it } from "vitest"
 import { ApiError } from "../src/client"
 import { opencodeErrorMessage, previewErrorMessage } from "../src/errors"
+import type { SessionStructuredError } from "../src/types"
 
 describe("opencodeErrorMessage", () => {
   it("returns the first line of the error message", () => {
     expect(
-      opencodeErrorMessage({ name: "UnknownError", data: { message: "PlatformError: NotFound\n    at foo" } }),
+      opencodeErrorMessage({ type: "UnknownError", message: "PlatformError: NotFound\n    at foo" }),
     ).toBe("PlatformError: NotFound")
   })
 
   it("returns null for aborted turns", () => {
-    expect(opencodeErrorMessage({ name: "MessageAbortedError", data: { message: "aborted" } })).toBeNull()
+    expect(opencodeErrorMessage({ type: "MessageAbortedError", message: "aborted" })).toBeNull()
   })
 
-  it("names the provider on auth errors without a message", () => {
-    expect(opencodeErrorMessage({ name: "ProviderAuthError", data: { providerID: "opencode-go" } })).toBe(
-      'Provider "opencode-go" is not authenticated',
+  it("returns null for every abort shape", () => {
+    expect(opencodeErrorMessage({ type: "MessageAbortedError", message: "" })).toBeNull()
+    expect(opencodeErrorMessage({ type: "MessageAbortedError", message: "multi\nline" })).toBeNull()
+  })
+
+  it("falls back when the message is missing or blank", () => {
+    expect(opencodeErrorMessage(undefined)).toBe("The agent reported an error")
+    expect(opencodeErrorMessage(null)).toBe("The agent reported an error")
+    expect(opencodeErrorMessage("nope" as unknown as SessionStructuredError)).toBe("The agent reported an error")
+    expect(opencodeErrorMessage({} as SessionStructuredError)).toBe("The agent reported an error")
+    expect(opencodeErrorMessage({ type: "UnknownError", message: "   " })).toBe("The agent reported an error")
+    expect(opencodeErrorMessage({ type: "UnknownError", message: "\nsecond line" })).toBe(
+      "The agent reported an error",
     )
   })
 
-  it("falls back for unknown payloads", () => {
-    expect(opencodeErrorMessage(undefined)).toBe("The agent reported an error")
-    expect(opencodeErrorMessage("nope")).toBe("The agent reported an error")
-    expect(opencodeErrorMessage({ name: "UnknownError", data: {} })).toBe("The agent reported an error")
+  it("keeps the original status available on the error payload", () => {
+    const error: SessionStructuredError = { type: "ProviderError", message: "boom", status: 503 }
+    expect(opencodeErrorMessage(error)).toBe("boom")
   })
 })
 
@@ -45,5 +55,9 @@ describe("previewErrorMessage", () => {
     expect(previewErrorMessage(apiError(500, { error: "weird" }))).not.toContain("{")
     expect(previewErrorMessage(new Error("boom"))).toBe("Could not start the preview")
     expect(previewErrorMessage("nope")).toBe("Could not start the preview")
+  })
+
+  it("tolerates an ApiError whose message is not JSON", () => {
+    expect(previewErrorMessage(new ApiError(500, "not-json"))).toBe("Could not start the preview")
   })
 })

@@ -46,7 +46,7 @@ npm run test:e2e      # E2E (Playwright + mocked opencode); run `npm run e2e:bro
 npm run dev:stop   # kills the dev orchestrator, BFF/tsx, Vite and opencode listeners
 ```
 
-If `opencode` is not on your `PATH`, install it first (`npm install -g opencode-ai`, or see https://opencode.ai/docs/).
+If `opencode` is not on your `PATH`, install opencode v2 first (`npm install -g @opencode/cli`, or see https://opencode.ai/docs/). MasterHand targets the v2 server API; a v1 binary will not work.
 
 `apps/server/.env.local` is also loaded by `npm run dev:server`'s own `tsx --env-file-if-exists`; it is **not** used by Docker.
 

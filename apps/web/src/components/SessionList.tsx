@@ -123,7 +123,7 @@ export function SessionList({
                   )}
                 </span>
                 <span className="pl-4 text-xs text-zinc-500">
-                  {directoryName(session.directory)} · {formatRelative(session.time.updated)}
+                  {directoryName(session.location.directory)} · {formatRelative(session.time.updated)}
                 </span>
               </button>
               <button

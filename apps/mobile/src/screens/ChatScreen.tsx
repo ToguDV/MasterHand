@@ -5,9 +5,9 @@ import {
   sessionUsage,
   useBffStatus,
   useMessages,
+  type ChatMessage,
   type Client,
   type FinishSessionResult,
-  type MessageWithParts,
   type SessionIsolation,
 } from "@masterhand/client-core"
 import { Composer } from "../components/Composer"
@@ -22,7 +22,7 @@ export function ChatScreen({
   title,
   busy,
   connected,
-  directory,
+  workspaceID,
   isolation,
   autoAccept,
   onToggleAutoAccept,
@@ -35,7 +35,7 @@ export function ChatScreen({
   title: string
   busy: boolean
   connected: boolean
-  directory?: string | null
+  workspaceID: string | null
   isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
@@ -44,10 +44,10 @@ export function ChatScreen({
   onBack: () => void
 }) {
   const queryClient = useQueryClient()
-  const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
+  const messagesQuery = useMessages(client, sessionID, { busy, connected })
   const statusQuery = useBffStatus(client)
   const [previewOpen, setPreviewOpen] = useState(false)
-  const listRef = useRef<FlatList<MessageWithParts>>(null)
+  const listRef = useRef<FlatList<ChatMessage>>(null)
   const [finishing, setFinishing] = useState(false)
   const [finishResult, setFinishResult] = useState<FinishSessionResult | null>(null)
   const [finishError, setFinishError] = useState<string | null>(null)
@@ -152,7 +152,7 @@ export function ChatScreen({
         client={client}
         sessionID={sessionID}
         busy={busy}
-        directory={directory}
+        workspaceID={workspaceID}
         autoAccept={autoAccept}
         onToggleAutoAccept={onToggleAutoAccept}
       />

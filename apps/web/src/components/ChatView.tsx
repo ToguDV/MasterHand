@@ -15,7 +15,7 @@ export function ChatView({
   sessionID,
   busy,
   connected,
-  directory,
+  workspaceID,
   isolation,
   autoAccept,
   onToggleAutoAccept,
@@ -24,14 +24,14 @@ export function ChatView({
   sessionID: string
   busy: boolean
   connected: boolean
-  directory?: string | null
+  workspaceID: string | null
   isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
   onOpenSession?: (id: string) => void
 }) {
   const queryClient = useQueryClient()
-  const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
+  const messagesQuery = useMessages(client, sessionID, { busy, connected })
   const [finishing, setFinishing] = useState(false)
   const [finishResult, setFinishResult] = useState<FinishSessionResult | null>(null)
   const [finishError, setFinishError] = useState<string | null>(null)
@@ -155,7 +155,7 @@ export function ChatView({
       <Composer
         sessionID={sessionID}
         busy={busy}
-        directory={directory}
+        workspaceID={workspaceID}
         autoAccept={autoAccept}
         onToggleAutoAccept={onToggleAutoAccept}
       />

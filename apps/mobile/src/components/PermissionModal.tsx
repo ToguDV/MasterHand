@@ -11,15 +11,15 @@ export function PermissionModal({
   busy: boolean
   onRespond: (response: "once" | "always" | "reject") => void
 }) {
-  const patterns = permission.patterns?.join(", ") ?? ""
+  const resources = permission.resources.join(", ")
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => {}}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <Text style={styles.heading}>Permission required</Text>
-          <Text style={styles.title}>{permission.permission}</Text>
-          {patterns ? <Text style={styles.meta}>{patterns}</Text> : null}
+          <Text style={styles.title}>{permission.action}</Text>
+          {resources ? <Text style={styles.meta}>{resources}</Text> : null}
 
           <View style={styles.actions}>
             <Pressable

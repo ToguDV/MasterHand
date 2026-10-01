@@ -41,7 +41,7 @@ services:
       context: .
       dockerfile: opencode.Dockerfile
       args:
-        OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.0.6}
     restart: unless-stopped
     environment:
       # Only the opencode credentials are shared with this container; the BFF

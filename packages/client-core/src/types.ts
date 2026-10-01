@@ -1,66 +1,43 @@
-import type { Agent, Message, Part, Provider, Session as OpenCodeSession, SessionStatus } from "@opencode-ai/sdk"
+import type {
+  AgentInfo,
+  ModelInfo,
+  ModelRef,
+  PermissionRequest,
+  ProviderInfo,
+  SessionInfo,
+  SessionStructuredError,
+  SessionStatus,
+  TokenUsageInfo,
+} from "@opencode/client"
 
 export type {
-  Message,
-  UserMessage,
-  AssistantMessage,
-  Part,
-  Event,
-  FileDiff,
-  Todo,
+  AgentInfo,
+  ModelInfo,
+  ModelRef,
+  ModelVariant,
+  PermissionRequest,
+  ProviderInfo,
+  SessionInfo,
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  SessionMessageInfo,
+  SessionMessageUser,
   SessionStatus,
-  TextPart,
-  ReasoningPart,
-  ToolPart,
-  ToolState,
-  Agent,
-  Provider,
-  Config,
-  Project,
-} from "@opencode-ai/sdk"
+  SessionStructuredError,
+  TokenUsageInfo,
+  V2Event,
+} from "@opencode/client"
 
 /**
- * A pending opencode permission request, as carried by the `permission.asked`
- * event and `GET /permission` (verified against opencode 1.18.32).
- *
- * The published SDK still describes the older `permission.updated` payload
- * (`type`, `pattern`, `title`, `time`), which the server no longer emits, so
- * MasterHand models the real shape here.
+ * A pending opencode permission request (v2 `Permission.Request`). Also carried
+ * by the `permission.asked` event and `GET /api/permission/request`.
  */
-export interface Permission {
-  id: string
-  sessionID: string
-  /** Permission kind, e.g. "bash", "edit". */
-  permission: string
-  /** Affected resources (commands, paths, globs). */
-  patterns: string[]
-  metadata?: Record<string, unknown>
-  /** Patterns the "always" answer would persist. */
-  always?: string[]
-  tool?: { messageID: string; callID: string }
-}
+export type Permission = PermissionRequest
 
-/**
- * The model a session last ran with. opencode persists it per session and
- * returns it from `GET /session`, but the published SDK types do not declare
- * the field yet.
- */
-/** Subtask part emitted by opencode when the `task` tool runs a subagent. */
-export interface SubtaskPart {
-  id: string
-  sessionID: string
-  messageID: string
-  type: "subtask"
-  prompt: string
-  description: string
-  agent: string
-}
+export type PermissionResponse = "once" | "always" | "reject"
 
-export interface SessionModel {
-  id: string
-  providerID: string
-  variant?: string
-}
+/** The model a session last ran with (opencode persists it per session). */
+export type SessionModel = ModelRef
 
 /**
  * MasterHand metadata for a session running in its own git worktree
@@ -68,7 +45,7 @@ export interface SessionModel {
  */
 export interface SessionIsolation {
   isolated: true
-  /** Worktree directory the session runs in (its opencode `directory`). */
+  /** Worktree directory the session runs in (its opencode location). */
   worktreePath: string
   /** Branch checked out in the worktree (unique per worktree). */
   branch: string
@@ -78,9 +55,7 @@ export interface SessionIsolation {
   prUrl?: string | null
 }
 
-export interface Session extends OpenCodeSession {
-  agent?: string
-  model?: SessionModel
+export interface Session extends SessionInfo {
   isolation?: SessionIsolation
 }
 
@@ -154,37 +129,96 @@ export interface DeviceLoginResponse {
   device: DeviceRecord
 }
 
-export interface MessageWithPartsResponse {
-  info: Message
-  parts: Part[]
-}
-
-export interface ModelInfo {
-  id: string
-  name: string
-  variants?: Record<string, Record<string, unknown>>
-}
-
-export interface ProviderInfo extends Omit<Provider, "models"> {
-  models: Record<string, ModelInfo>
-}
-
-export interface AgentInfo extends Agent {
-  hidden?: boolean
-}
-
-export interface ProvidersResponse {
-  providers: ProviderInfo[]
-  default: Record<string, string>
-}
-
 export type SessionStatuses = Record<string, SessionStatus>
 
-export interface PromptBody {
-  parts: Array<{ type: "text"; text: string }>
-  agent?: string
-  variant?: string
-  model?: { providerID: string; modelID: string }
+/** Catalog used by the model selector: models, providers and the server default. */
+export interface ModelsCatalog {
+  models: ModelInfo[]
+  providers: ProviderInfo[]
+  defaultModel: ModelInfo | null
 }
 
-export type PermissionResponse = "once" | "always" | "reject"
+export interface PromptInput {
+  text: string
+  /** Agent id to run the turn with (switched before prompting when it changed). */
+  agent?: string
+  /** Model (and optional variant) to run the turn with. */
+  model?: ModelRef
+}
+
+/** Current agent/model of the session, used to avoid redundant switch calls. */
+export interface PromptContext {
+  agent?: string
+  model?: ModelRef
+}
+
+/** Normalized chat view model shared by web and mobile. */
+export interface ChatMessageInfo {
+  id: string
+  sessionID: string
+  role: "user" | "assistant"
+  time: { created: number; streamed?: number; completed?: number }
+  agent?: string
+  providerID?: string
+  modelID?: string
+  cost?: number
+  tokens?: TokenUsageInfo
+  error?: SessionStructuredError
+}
+
+export type ChatToolStatus = "pending" | "running" | "completed" | "error"
+
+export interface ChatToolState {
+  status: ChatToolStatus
+  title?: string
+  input: Record<string, unknown>
+  output?: string
+  error?: string
+  metadata?: Record<string, unknown>
+  /** Raw (partial) JSON while the tool input is still streaming. */
+  raw?: string
+}
+
+export type ChatTextPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "text"
+  text: string
+}
+
+export type ChatReasoningPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "reasoning"
+  text: string
+}
+
+export type ChatToolPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "tool"
+  tool: string
+  callID: string
+  state: ChatToolState
+}
+
+/** Kept for compatibility with the previous subagent card model. */
+export type ChatSubtaskPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "subtask"
+  prompt: string
+  description: string
+  agent: string
+}
+
+export type ChatPart = ChatTextPart | ChatReasoningPart | ChatToolPart | ChatSubtaskPart
+
+export interface ChatMessage {
+  info: ChatMessageInfo
+  parts: ChatPart[]
+}

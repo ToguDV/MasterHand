@@ -11,11 +11,13 @@ interface OpencodeCall {
   method: string
   path: string
   directory: string | null
+  query: URLSearchParams
   body?: string
+  parsedBody?: { location?: { directory?: string }; value?: string }
 }
 
-/** Minimal opencode stand-in for the session endpoints the BFF calls. */
-function createOpencodeMock() {
+/** Minimal opencode v2 stand-in for the session endpoints the BFF calls. */
+function createOpencodeMock(options: { pageSize?: number } = {}) {
   const sessions = new Map<string, MockSession[]>()
   const calls: OpencodeCall[] = []
   let counter = 0
@@ -23,28 +25,38 @@ function createOpencodeMock() {
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = init?.method ?? "GET"
-    const directory = url.searchParams.get("directory")
-      ?? (init?.headers ? new Headers(init.headers).get("x-opencode-directory") : null)
-    const decoded = directory ? decodeURIComponent(directory) : null
-    calls.push({
-      method,
-      path: url.pathname,
-      directory: decoded,
-      body: typeof init?.body === "string" ? init.body : undefined,
-    })
+    const body = typeof init?.body === "string" ? init.body : undefined
+    let parsedBody: OpencodeCall["parsedBody"]
+    if (body) {
+      try {
+        parsedBody = JSON.parse(body) as OpencodeCall["parsedBody"]
+      } catch {
+        // non-JSON bodies are forwarded untouched
+      }
+    }
+    const directory = url.searchParams.get("directory") ?? parsedBody?.location?.directory ?? null
+    calls.push({ method, path: url.pathname, directory, query: url.searchParams, body, parsedBody })
 
-    if (method === "GET" && url.pathname === "/session") {
-      return Response.json(sessions.get(decoded ?? "") ?? [])
+    if (method === "GET" && url.pathname === "/api/session") {
+      const list = sessions.get(directory ?? "") ?? []
+      const limit = options.pageSize ?? Number(url.searchParams.get("limit") ?? "200")
+      const offset = Number(url.searchParams.get("cursor") ?? "0")
+      const page = list.slice(offset, offset + limit)
+      const next = offset + limit < list.length ? String(offset + limit) : null
+      return Response.json({ data: page, cursor: { previous: null, next } })
     }
-    if (method === "POST" && url.pathname === "/session") {
-      const session: MockSession = { id: `ses_${++counter}`, directory: decoded ?? "" }
-      const list = sessions.get(decoded ?? "") ?? []
+    if (method === "POST" && url.pathname === "/api/session") {
+      const session: MockSession = { id: `ses_${++counter}`, directory: directory ?? "" }
+      const list = sessions.get(directory ?? "") ?? []
       list.push(session)
-      sessions.set(decoded ?? "", list)
-      return Response.json(session)
+      sessions.set(directory ?? "", list)
+      return Response.json({ data: session })
     }
-    if (method === "DELETE" && url.pathname.startsWith("/session/")) {
-      return Response.json(true)
+    if (method === "PUT" && url.pathname.includes("/instructions/entries/")) {
+      return new Response(null, { status: 204 })
+    }
+    if (method === "DELETE" && url.pathname.startsWith("/api/session/")) {
+      return new Response(null, { status: 204 })
     }
     return new Response("not found", { status: 404 })
   }) as typeof fetch
@@ -52,8 +64,8 @@ function createOpencodeMock() {
   return { fetchImpl, sessions, calls }
 }
 
-async function setupApp() {
-  const opencode = createOpencodeMock()
+async function setupApp(mockOptions: { pageSize?: number } = {}) {
+  const opencode = createOpencodeMock(mockOptions)
   const worktrees = createFakeWorktreeManager()
   const app = await startTestApp({ worktrees, fetchImpl: opencode.fetchImpl })
   const cookie = await login(app.url)
@@ -85,11 +97,11 @@ describe("POST /api/workspaces/:id/sessions", () => {
       }
       expect(body.session.isolation).toBeUndefined()
       expect(body.isolation).toBeNull()
-      expect(opencode.calls.at(-1)).toMatchObject({
-        method: "POST",
-        path: "/session",
-        directory: workspace.path,
-      })
+
+      const creation = opencode.calls.find((call) => call.method === "POST" && call.path === "/api/session")
+      expect(creation?.parsedBody).toEqual({ location: { directory: workspace.path } })
+      expect(creation?.directory).toBe(workspace.path)
+      expect(creation?.query.get("directory")).toBeNull()
       expect(worktrees.calls).toHaveLength(0)
       expect(app.store.getIsolatedSession(body.session.id)).toBeNull()
     } finally {
@@ -116,7 +128,10 @@ describe("POST /api/workspaces/:id/sessions", () => {
 
       const record = app.store.getIsolatedSession(body.session.id)
       expect(record).toMatchObject({ workspaceID: workspace.id, branch: isolation.branch })
-      expect(opencode.calls.at(-1)).toMatchObject({ method: "POST", directory: isolation.worktreePath })
+
+      const creation = opencode.calls.find((call) => call.method === "POST" && call.path === "/api/session")
+      expect(creation?.parsedBody).toEqual({ location: { directory: isolation.worktreePath } })
+      expect(creation?.directory).toBe(isolation.worktreePath)
     } finally {
       await app.close()
     }
@@ -129,7 +144,7 @@ describe("POST /api/workspaces/:id/sessions", () => {
       worktrees,
       fetchImpl: (async (input: string | URL | Request, init?: RequestInit) => {
         const url = new URL(String(input))
-        if ((init?.method ?? "GET") === "POST" && url.pathname === "/session") {
+        if ((init?.method ?? "GET") === "POST" && url.pathname === "/api/session") {
           return new Response("boom", { status: 500 })
         }
         return opencode.fetchImpl(input as string, init)
@@ -196,6 +211,28 @@ describe("GET /api/workspaces/:id/sessions", () => {
     }
   })
 
+  it("follows the v2 cursor pagination when listing sessions", async () => {
+    const { app, opencode, headers, workspace } = await setupApp({ pageSize: 1 })
+    try {
+      opencode.sessions.set(workspace.path, [
+        { id: "ses_a", directory: workspace.path },
+        { id: "ses_b", directory: workspace.path },
+      ])
+
+      const response = await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, { headers })
+      const body = (await response.json()) as { sessions: Array<{ id: string }> }
+      expect(body.sessions.map((session) => session.id).sort()).toEqual(["ses_a", "ses_b"])
+
+      const lists = opencode.calls.filter((call) => call.method === "GET" && call.path === "/api/session")
+      expect(lists).toHaveLength(2)
+      expect(lists[0]?.query.get("limit")).toBe("200")
+      expect(lists[0]?.query.get("cursor")).toBeNull()
+      expect(lists[1]?.query.get("cursor")).toBe("1")
+    } finally {
+      await app.close()
+    }
+  })
+
   it("returns 502 when opencode is unreachable", async () => {
     const app = await startTestApp({ fetchImpl: (async () => {
       throw new Error("offline")
@@ -254,10 +291,11 @@ describe("DELETE /api/workspaces/:id/sessions/:sessionID", () => {
         headers,
       })
       expect(response.status).toBe(200)
-      expect(opencode.calls.at(-1)).toMatchObject({
-        method: "DELETE",
-        directory: session.isolation.worktreePath,
-      })
+
+      const deletion = opencode.calls.find((call) => call.method === "DELETE")
+      expect(deletion?.path).toBe(`/api/session/${session.id}`)
+      expect(deletion?.directory).toBeNull()
+      expect(deletion?.query.get("directory")).toBeNull()
       expect(worktrees.calls.some((call) => call.startsWith("remove:"))).toBe(true)
       expect(app.store.getIsolatedSession(session.id)).toBeNull()
     } finally {
@@ -265,8 +303,8 @@ describe("DELETE /api/workspaces/:id/sessions/:sessionID", () => {
     }
   })
 
-  it("rejects a directory outside the workspace", async () => {
-    const { app, headers, workspace } = await setupApp()
+  it("deletes a session without a directory query", async () => {
+    const { app, opencode, headers, workspace } = await setupApp()
     try {
       const created = await fetch(`${app.url}/api/workspaces/${workspace.id}/sessions`, {
         method: "POST",
@@ -279,7 +317,10 @@ describe("DELETE /api/workspaces/:id/sessions/:sessionID", () => {
         `${app.url}/api/workspaces/${workspace.id}/sessions/${session.id}?directory=${encodeURIComponent("/etc")}`,
         { method: "DELETE", headers },
       )
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(200)
+      const deletion = opencode.calls.find((call) => call.method === "DELETE")
+      expect(deletion?.path).toBe(`/api/session/${session.id}`)
+      expect(deletion?.query.get("directory")).toBeNull()
     } finally {
       await app.close()
     }

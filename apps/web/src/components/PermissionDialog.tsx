@@ -9,18 +9,18 @@ export function PermissionDialog({
   busy: boolean
   onRespond: (response: "once" | "always" | "reject") => void
 }) {
-  const patterns = permission.patterns?.join(", ") ?? ""
+  const resources = permission.resources.join(", ")
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 md:items-center md:p-4">
       <div className="pb-safe w-full max-w-lg rounded-t-2xl border border-zinc-800 bg-zinc-900 p-4 md:rounded-2xl">
         <p className="text-xs font-semibold uppercase tracking-wide text-amber-400">Permission required</p>
         <h3 data-testid="permission-kind" className="mt-1 break-words text-base font-semibold">
-          {permission.permission}
+          {permission.action}
         </h3>
-        {patterns && (
+        {resources && (
           <p data-testid="permission-patterns" className="mt-1 break-words text-xs text-zinc-500">
-            {patterns}
+            {resources}
           </p>
         )}
 

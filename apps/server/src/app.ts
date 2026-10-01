@@ -16,7 +16,7 @@ import {
 } from "./auth.js"
 import type { Config } from "./config.js"
 import type { EventHub } from "./events.js"
-import { createPreviewManager, PreviewError, type PreviewManager } from "./preview.js"
+import { createPreviewManager, previewSystemPrompt, PreviewError, type PreviewManager } from "./preview.js"
 import { createOpencodeProxy } from "./proxy.js"
 import type { IsolatedSessionRecord, Store } from "./store.js"
 import {
@@ -95,8 +95,7 @@ export function createApp(deps: AppDeps): Hono {
 
   /**
    * Calls opencode directly (injecting basic auth). The `directory` override
-   * travels as a query parameter on GET and as the header on mutations, exactly
-   * like the clients' proxy calls.
+   * travels as a query parameter exactly like the clients' proxy calls.
    */
   function callOpencode(
     path: string,
@@ -106,11 +105,8 @@ export function createApp(deps: AppDeps): Hono {
     const headers = new Headers()
     if (config.opencodeAuth) headers.set("authorization", config.opencodeAuth)
     if (options.body !== undefined) headers.set("content-type", "application/json")
-    if (options.directory && method !== "GET" && method !== "HEAD") {
-      headers.set("x-opencode-directory", encodeURIComponent(options.directory))
-    }
     const target = new URL(path, config.opencodeUrl)
-    if (options.directory && (method === "GET" || method === "HEAD")) {
+    if (options.directory) {
       target.searchParams.set("directory", options.directory)
     }
     return fetchImpl(target, {
@@ -120,10 +116,52 @@ export function createApp(deps: AppDeps): Hono {
     })
   }
 
+  /** Lists every session in a directory, following opencode's v2 cursor pagination. */
   async function sessionsInDirectory(directory: string): Promise<OpencodeSession[]> {
-    const response = await callOpencode("/session", { directory })
-    if (!response.ok) throw new Error(`opencode ${response.status}`)
-    return (await response.json()) as OpencodeSession[]
+    const sessions: OpencodeSession[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < 50; page += 1) {
+      const target = new URL("/api/session", config.opencodeUrl)
+      target.searchParams.set("directory", directory)
+      target.searchParams.set("limit", "200")
+      if (cursor) target.searchParams.set("cursor", cursor)
+      const response = await fetchImpl(target, {
+        headers: config.opencodeAuth ? { authorization: config.opencodeAuth } : {},
+      })
+      if (!response.ok) throw new Error(`opencode ${response.status}`)
+      const body = (await response.json()) as {
+        data?: OpencodeSession[]
+        cursor?: { next?: string | null }
+      }
+      sessions.push(...(body.data ?? []))
+      const next = body.cursor?.next
+      if (!next) break
+      cursor = next
+    }
+    return sessions
+  }
+
+  /**
+   * Records the reserved preview port as a session instruction entry so the
+   * agent binds its web server to it. Best effort: previews must never block
+   * session creation or prompting.
+   */
+  async function ensurePreviewInstruction(sessionID: string): Promise<void> {
+    if (!config.previewEnabled) return
+    let port: number
+    try {
+      port = preview.portFor(sessionID)
+    } catch {
+      return
+    }
+    try {
+      await callOpencode(
+        `/api/experimental/session/${encodeURIComponent(sessionID)}/instructions/entries/masterhand.preview`,
+        { method: "PUT", body: { value: previewSystemPrompt(port) } },
+      )
+    } catch {
+      // opencode unreachable: the preview will simply not know its port yet
+    }
   }
 
   app.use("/api/*", requireSameOrigin(config))
@@ -192,10 +230,7 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   app.use("/api/oc/*", requireAuth(config, deps.store))
-  app.all(
-    "/api/oc/*",
-    createOpencodeProxy(config, fetchImpl, { preview: config.previewEnabled ? preview : undefined }),
-  )
+  app.all("/api/oc/*", createOpencodeProxy(config, fetchImpl))
 
   const api = new Hono()
   api.use("*", requireAuth(config, deps.store))
@@ -207,15 +242,15 @@ export function createApp(deps: AppDeps): Hono {
       portRange: config.previewPortRange,
     }
     try {
-      const health = await fetchImpl(new URL("/global/health", config.opencodeUrl), {
+      const health = await fetchImpl(new URL("/api/info", config.opencodeUrl), {
         headers: config.opencodeAuth ? { authorization: config.opencodeAuth } : {},
         signal: AbortSignal.timeout(3000),
       })
       if (!health.ok) return c.json({ ok: true, opencode: { healthy: false }, preview: previewStatus })
-      const data = (await health.json()) as { healthy?: boolean; version?: string }
+      const data = (await health.json()) as { version?: string }
       return c.json({
         ok: true,
-        opencode: { healthy: data.healthy === true, version: data.version },
+        opencode: { healthy: true, version: data.version },
         preview: previewStatus,
       })
     } catch {
@@ -364,12 +399,17 @@ export function createApp(deps: AppDeps): Hono {
     if (body.isolated !== true) {
       let response: Response
       try {
-        response = await callOpencode("/session", { method: "POST", directory: workspace.path, body: {} })
+        response = await callOpencode("/api/session", {
+          method: "POST",
+          body: { location: { directory: workspace.path } },
+        })
       } catch {
         return c.json({ error: "opencode_unreachable" }, 502)
       }
       if (!response.ok) return c.json({ error: "opencode_error" }, 502)
-      return c.json({ session: await response.json(), isolation: null }, 201)
+      const session = ((await response.json()) as { data: OpencodeSession }).data
+      await ensurePreviewInstruction(session.id)
+      return c.json({ session, isolation: null }, 201)
     }
 
     const token = randomUUID().replace(/-/g, "").slice(0, 10)
@@ -389,10 +429,14 @@ export function createApp(deps: AppDeps): Hono {
       baseRef = worktrees.headBranch(workspace.path)
       worktrees.create(workspace.path, path, branch, baseRef)
 
-      const response = await callOpencode("/session", { method: "POST", directory: path, body: {} })
+      const response = await callOpencode("/api/session", {
+        method: "POST",
+        body: { location: { directory: path } },
+      })
       if (!response.ok) throw new Error("opencode_error")
-      const session = (await response.json()) as OpencodeSession
+      const session = ((await response.json()) as { data: OpencodeSession }).data
       sessionID = session.id
+      await ensurePreviewInstruction(session.id)
 
       const record: IsolatedSessionRecord = {
         sessionID: session.id,
@@ -408,10 +452,7 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ session: { ...session, isolation: isolationOf(record) }, isolation: isolationOf(record) }, 201)
     } catch (error) {
       if (sessionID) {
-        void callOpencode(`/session/${encodeURIComponent(sessionID)}`, {
-          method: "DELETE",
-          directory: path,
-        }).catch(() => {})
+        void callOpencode(`/api/session/${encodeURIComponent(sessionID)}`, { method: "DELETE" }).catch(() => {})
       }
       try {
         worktrees.remove(workspace.path, path, branch)
@@ -432,24 +473,9 @@ export function createApp(deps: AppDeps): Hono {
     const record = deps.store.getIsolatedSession(sessionID)
     const isolated = record && record.workspaceID === workspace.id
 
-    // The client passes the directory it resolved (worktree for child sessions).
-    const requested = c.req.query("directory")
-    let directory = isolated ? record.path : workspace.path
-    if (requested) {
-      const allowed = [
-        workspace.path,
-        ...deps.store.listIsolatedSessions(workspace.id).map((item) => item.path),
-      ]
-      if (!allowed.includes(requested)) return c.json({ error: "outside_workspace" }, 403)
-      directory = requested
-    }
-
     let response: Response
     try {
-      response = await callOpencode(`/session/${encodeURIComponent(sessionID)}`, {
-        method: "DELETE",
-        directory,
-      })
+      response = await callOpencode(`/api/session/${encodeURIComponent(sessionID)}`, { method: "DELETE" })
     } catch {
       return c.json({ error: "opencode_unreachable" }, 502)
     }
@@ -522,6 +548,7 @@ export function createApp(deps: AppDeps): Hono {
   api.post("/sessions/:sessionID/preview", async (c) => {
     if (!config.previewEnabled) return c.json({ error: "preview_disabled" }, 404)
     if (!preview.available()) return c.json({ error: "preview_unavailable" }, 503)
+    await ensurePreviewInstruction(c.req.param("sessionID"))
     try {
       return c.json({ preview: await preview.start(c.req.param("sessionID")) })
     } catch (error) {

@@ -146,25 +146,35 @@ describe("preview routes", () => {
     expect(response.status).toBe(404)
   })
 
-  it("forgets the reserved port when a session is deleted", async () => {
+  it("reserves the port on session creation and forgets it on deletion", async () => {
     upstream = await startMockOpencode()
     app = await startTestApp({ config: { opencodeUrl: upstream.url } })
     const cookie = await login(app.url)
 
-    await fetch(`${app.url}/api/oc/session/ses_55/prompt_async`, {
+    app.store.createWorkspace({ id: "ws", name: "ws", path: "/tmp/masterhand-workspaces/ws", createdAt: Date.now() })
+    const created = await fetch(`${app.url}/api/workspaces/ws/sessions`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ parts: [{ type: "text", text: "hello" }] }),
+      body: JSON.stringify({}),
     })
-    expect(app.store.getPreviewPort("ses_55")).toBe(32900)
+    expect(created.status).toBe(201)
+    const { session } = (await created.json()) as { session: { id: string } }
 
-    app.store.createWorkspace({ id: "ws", name: "ws", path: "/tmp/masterhand-workspaces/ws", createdAt: Date.now() })
-    const deleted = await fetch(`${app.url}/api/workspaces/ws/sessions/ses_55`, {
+    // The v2 instructions entry carries the reserved port to the agent.
+    const instruction = upstream.requests.find((request) => request.path.includes("/instructions/entries/"))
+    expect(instruction?.method).toBe("PUT")
+    expect(instruction?.path).toBe(
+      `/api/experimental/session/${session.id}/instructions/entries/masterhand.preview`,
+    )
+    expect(JSON.parse(instruction?.body ?? "{}")).toMatchObject({ value: expect.stringContaining("0.0.0.0") })
+    expect(app.store.getPreviewPort(session.id)).toBe(32900)
+
+    const deleted = await fetch(`${app.url}/api/workspaces/ws/sessions/${session.id}`, {
       method: "DELETE",
       headers: { cookie },
     })
     expect(deleted.status).toBe(200)
-    expect(app.store.getPreviewPort("ses_55")).toBeNull()
+    expect(app.store.getPreviewPort(session.id)).toBeNull()
   })
 })
 

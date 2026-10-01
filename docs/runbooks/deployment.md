@@ -133,14 +133,21 @@ Whatever you use, **disable response buffering for SSE** (`/api/events`) and for
 
 ## 7. Upgrade and backups
 
+MasterHand targets opencode **v2** (`OPENCODE_VERSION`, pinned in `deploy/.env`). The first time the `opencode` container starts with v2 it migrates the v1 session data in `opencode_data`; the v2 beta warns that data may be reset while contracts stabilize.
+
 ```bash
+# 0. back up the opencode data volume BEFORE the first v2 start
+docker run --rm -v masterhand_opencode_data:/data -v "$PWD":/backup busybox \
+  tar czf /backup/opencode_data_v1.tgz -C /data .
+
 # upgrade
 docker compose -f deploy/docker-compose.yml build
 docker compose -f deploy/docker-compose.yml up -d
 
-# backups (example)
-docker run --rm -v masterhand_masterhand_data:/data -v "$PWD":/backup busybox \
-  tar czf /backup/masterhand_data.tgz -C /data .
+# follow the v1 → v2 migration from inside the BFF (it speaks basic auth upstream)
+curl -s -u "opencode:$OPENCODE_SERVER_PASSWORD" http://127.0.0.1:4096/api/experimental/migration/v1
 ```
 
-Back up the volumes `masterhand_data`, `opencode_data` and `opencode_config`.
+`GET /api/experimental/migration/v1` returns the migration status (`required`, `running`, `done`, …). Sessions and history appear in MasterHand once it reports done; check `docker compose logs opencode` if it fails.
+
+Back up the volumes `masterhand_data`, `opencode_data` and `opencode_config` regularly (not only when upgrading).

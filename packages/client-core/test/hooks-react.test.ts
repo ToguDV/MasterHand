@@ -9,11 +9,10 @@ import type { Client } from "../src/client"
 import {
   useAgents,
   useBffStatus,
-  useConfig,
   useEventStream,
   useMessages,
+  useModels,
   usePreview,
-  useProviders,
   useSessionDirectories,
   useSessions,
   useSessionStatuses,
@@ -40,8 +39,7 @@ function makeClient(stream = makeEventStream()) {
     statuses: vi.fn(async () => ({})),
     messages: vi.fn(async () => []),
     agents: vi.fn(async () => []),
-    providers: vi.fn(async () => ({ providers: [], default: {} })),
-    config: vi.fn(async () => ({ model: "x/y" })),
+    models: vi.fn(async () => ({ models: [], providers: [], defaultModel: null })),
     preview: vi.fn(async () => ({ status: "stopped", url: null, port: null, error: null })),
   }
   const eventStream = vi.fn((_options: Parameters<Client["eventStream"]>[0]) => stream)
@@ -114,7 +112,7 @@ describe("query hooks", () => {
       wrapper: wrapper(qc),
     })
     await waitFor(() => expect(enabled.result.current.isSuccess).toBe(true))
-    expect(api.messages).toHaveBeenCalledWith("ses_1", undefined)
+    expect(api.messages).toHaveBeenCalledWith("ses_1")
   })
 
   it("useSessionDirectories loads the directory list for a workspace", async () => {
@@ -135,20 +133,18 @@ describe("query hooks", () => {
     expect(workspaces.list).toHaveBeenCalledTimes(1)
   })
 
-  it("useAgents, useProviders and useConfig load their resources", async () => {
+  it("useAgents and useModels load their catalogs", async () => {
     const qc = newQueryClient()
     const { client, api } = makeClient()
 
     const agents = renderHook(() => useAgents(client), { wrapper: wrapper(qc) })
-    const providers = renderHook(() => useProviders(client), { wrapper: wrapper(qc) })
-    const config = renderHook(() => useConfig(client), { wrapper: wrapper(qc) })
+    const models = renderHook(() => useModels(client), { wrapper: wrapper(qc) })
 
-    await waitFor(() => expect(config.result.current.isSuccess).toBe(true))
-    await waitFor(() => expect(providers.result.current.isSuccess).toBe(true))
     await waitFor(() => expect(agents.result.current.isSuccess).toBe(true))
+    await waitFor(() => expect(models.result.current.isSuccess).toBe(true))
     expect(api.agents).toHaveBeenCalledTimes(1)
-    expect(api.providers).toHaveBeenCalledTimes(1)
-    expect(api.config).toHaveBeenCalledTimes(1)
+    expect(api.models).toHaveBeenCalledTimes(1)
+    expect(models.result.current.data).toEqual({ models: [], providers: [], defaultModel: null })
   })
 
   it("usePreview stays disabled without a session and fetches with one", async () => {

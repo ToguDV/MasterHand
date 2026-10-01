@@ -1,268 +1,670 @@
 import { describe, expect, it } from "vitest"
-import type { AssistantMessage, Message, Part, TextPart, ToolPart, UserMessage } from "../src/types"
+import type {
+  ChatMessage,
+  ChatPart,
+  ChatToolPart,
+  ChatToolState,
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  SessionMessageInfo,
+  SessionMessageUser,
+  TokenUsageInfo,
+} from "../src/types"
 import {
+  appendDelta,
   directoryName,
   formatRelative,
   hasVisibleParts,
   isStreaming,
   isTaskTool,
-  mergePart,
+  makeToolPart,
   messageText,
+  partsFromContent,
+  placeholderAssistant,
   removeMessage,
-  removePart,
+  replaceParts,
   sessionUsage,
+  setMessageCost,
+  setStreamText,
   splitFences,
   subagentInfo,
   subagentOutput,
+  toChatMessage,
   toolTitle,
+  updateToolPart,
   upsertMessage,
-  upsertPart,
-  type MessageWithParts,
+  upsertToolPart,
 } from "../src/chat"
 
-function textPart(id: string, messageID: string, text: string): TextPart {
-  return { id, sessionID: "ses_1", messageID, type: "text", text }
+const SESSION = "ses_1"
+
+function tokens(output: number): TokenUsageInfo {
+  return { input: 0, output, reasoning: 0, cache: { read: 0, write: 0 } }
 }
 
-function userMessage(id: string): UserMessage {
+function userMessage(id: string, text = "hi", created = 1): SessionMessageUser {
+  return { type: "user", id, time: { created }, text }
+}
+
+function idleMessage(id: string): SessionMessageInfo {
+  return { type: "idle", id, time: { created: 1 }, outcome: "succeeded" } as SessionMessageInfo
+}
+
+function toolMessage(
+  id: string,
+  name: string,
+  state: SessionMessageAssistantTool["state"],
+): SessionMessageAssistantTool {
+  return { type: "tool", id, name, state, time: { created: 1 } }
+}
+
+function assistantMessage(overrides: Partial<SessionMessageAssistant> = {}): SessionMessageAssistant {
   return {
-    id,
-    sessionID: "ses_1",
-    role: "user",
-    time: { created: Date.now() },
+    type: "assistant",
+    id: "msg_a",
+    time: { created: 1, streamed: 2, completed: 3 },
     agent: "build",
-    model: { providerID: "test", modelID: "test-model" },
+    model: { id: "claude", providerID: "anthropic" },
+    content: [],
+    ...overrides,
   }
 }
 
-function assistantMessage(id: string, cost: number, output: number): AssistantMessage {
-  return {
-    id,
-    sessionID: "ses_1",
-    role: "assistant",
-    time: { created: 1, completed: 2 },
-    modelID: "test-model",
-    providerID: "test",
-    cost,
-    tokens: { input: 0, output, reasoning: 0, cache: { read: 0, write: 0 } },
-  } as unknown as AssistantMessage
+function chatMessage(id: string, parts: ChatPart[] = [], role: "user" | "assistant" = "assistant"): ChatMessage {
+  return { info: { id, sessionID: SESSION, role, time: { created: 1 } }, parts }
 }
+
+function textPart(id: string, text: string, messageID = "msg_1"): ChatPart {
+  return { id, sessionID: SESSION, messageID, type: "text", text }
+}
+
+function toolPart(id: string, state: ChatToolState, tool = "bash"): ChatToolPart {
+  return { id, sessionID: SESSION, messageID: "msg_1", type: "tool", tool, callID: id, state }
+}
+
+describe("toChatMessage", () => {
+  it("adapts a v2 user message with its text", () => {
+    const message = toChatMessage(userMessage("msg_u", "hello", 7), SESSION)
+    expect(message).toEqual({
+      info: { id: "msg_u", sessionID: SESSION, role: "user", time: { created: 7 } },
+      parts: [{ id: "msg_u:text", sessionID: SESSION, messageID: "msg_u", type: "text", text: "hello" }],
+    })
+  })
+
+  it("adapts a v2 assistant message with metadata, content and usage", () => {
+    const assistant = assistantMessage({
+      content: [
+        { type: "text", text: "answer" },
+        { type: "reasoning", text: "thinking" },
+      ],
+      cost: 0.5,
+      tokens: tokens(42),
+      error: { type: "ProviderError", message: "nope", status: 500 },
+    })
+
+    const message = toChatMessage(assistant, SESSION)
+    expect(message?.info).toEqual({
+      id: "msg_a",
+      sessionID: SESSION,
+      role: "assistant",
+      time: { created: 1, streamed: 2, completed: 3 },
+      agent: "build",
+      providerID: "anthropic",
+      modelID: "claude",
+      cost: 0.5,
+      tokens: tokens(42),
+      error: { type: "ProviderError", message: "nope", status: 500 },
+    })
+    expect(message?.parts.map((part) => part.type)).toEqual(["text", "reasoning"])
+    expect(message?.parts[0]?.id).toBe("msg_a:0")
+    expect(message?.parts[1]?.id).toBe("msg_a:1")
+  })
+
+  it("tolerates assistant messages without model or usage", () => {
+    const assistant = {
+      type: "assistant",
+      id: "msg_a",
+      time: { created: 1 },
+      agent: "build",
+      content: [{ type: "text", text: "x" }],
+    } as SessionMessageAssistant
+
+    const message = toChatMessage(assistant, SESSION)
+    expect(message?.info.providerID).toBeUndefined()
+    expect(message?.info.modelID).toBeUndefined()
+    expect(message?.info.cost).toBeUndefined()
+    expect(message?.info.tokens).toBeUndefined()
+  })
+
+  it("returns null for non-chat message entries", () => {
+    expect(toChatMessage(idleMessage("msg_idle"), SESSION)).toBeNull()
+    expect(
+      toChatMessage({ type: "system", id: "msg_sys", time: { created: 1 }, text: "x" }, SESSION),
+    ).toBeNull()
+  })
+
+  it("maps tool states to the chat view model", () => {
+    const streaming = toChatMessage(
+      assistantMessage({
+        content: [toolMessage("tool_1", "bash", { status: "streaming", input: '{"cmd"' })],
+      }),
+      SESSION,
+    )
+    const pending = streaming?.parts[0] as ChatToolPart
+    expect(pending).toMatchObject({
+      type: "tool",
+      tool: "bash",
+      callID: "tool_1",
+      state: { status: "pending", input: {}, raw: '{"cmd"' },
+    })
+
+    const running = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_2", "read", {
+            status: "running",
+            input: { file: "a.ts" },
+            metadata: { title: "Reading" },
+          }),
+        ],
+      }),
+      SESSION,
+    )
+    const started = running?.parts[0] as ChatToolPart
+    expect(started.state).toEqual({
+      status: "running",
+      input: { file: "a.ts" },
+      metadata: { title: "Reading" },
+      title: "Reading",
+    })
+
+    const completed = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_3", "bash", {
+            status: "completed",
+            input: {},
+            content: [
+              { type: "text", text: "out" },
+              { type: "file", uri: "file://x", mime: "text/plain", name: "x.ts" },
+            ],
+            metadata: { title: "Done" },
+          }),
+        ],
+      }),
+      SESSION,
+    )
+    const done = completed?.parts[0] as ChatToolPart
+    expect(done.state).toEqual({
+      status: "completed",
+      input: {},
+      output: "out\n[x.ts] file://x",
+      metadata: { title: "Done" },
+      title: "Done",
+    })
+
+    const failed = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_4", "bash", {
+            status: "error",
+            input: {},
+            error: { type: "ToolError", message: "kaboom" },
+            content: [{ type: "text", text: "details" }],
+          }),
+        ],
+      }),
+      SESSION,
+    )
+    const error = failed?.parts[0] as ChatToolPart
+    expect(error.state).toEqual({
+      status: "error",
+      input: {},
+      output: "details",
+      error: "kaboom",
+      metadata: undefined,
+    })
+  })
+
+  it("omits tool output when there is no renderable content", () => {
+    const running = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_1", "bash", { status: "running", input: {}, metadata: {} }),
+        ],
+      }),
+      SESSION,
+    )
+    expect((running?.parts[0] as ChatToolPart).state.title).toBeUndefined()
+
+    const completed = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_2", "bash", {
+            status: "completed",
+            input: {},
+            content: [],
+          } as unknown as SessionMessageAssistantTool["state"]),
+        ],
+      }),
+      SESSION,
+    )
+    expect((completed?.parts[0] as ChatToolPart).state.output).toBeUndefined()
+  })
+
+  it("names file outputs by their URI when they have no name", () => {
+    const completed = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_1", "read", {
+            status: "completed",
+            input: {},
+            content: [{ type: "file", uri: "file://plain", mime: "text/plain" }],
+          }),
+        ],
+      }),
+      SESSION,
+    )
+    expect((completed?.parts[0] as ChatToolPart).state.output).toBe("[file://plain] file://plain")
+  })
+})
+
+describe("partsFromContent", () => {
+  it("projects text, reasoning and tool parts with ordinal ids", () => {
+    const parts = partsFromContent(
+      [
+        { type: "text", text: "hello" },
+        { type: "reasoning", text: "think" },
+        { type: "tool", id: "t1", name: "bash", state: { status: "running", input: {}, metadata: {} } },
+      ],
+      SESSION,
+      "msg_1",
+    )
+
+    expect(parts.map((part) => [part.id, part.type])).toEqual([
+      ["msg_1:0", "text"],
+      ["msg_1:1", "reasoning"],
+      ["t1", "tool"],
+    ])
+    expect(parts[0]).toEqual({ id: "msg_1:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "hello" })
+    expect(parts[2]).toMatchObject({ type: "tool", tool: "bash", callID: "t1" })
+  })
+
+  it("returns an empty list for empty content", () => {
+    expect(partsFromContent([], SESSION, "msg_1")).toEqual([])
+  })
+})
+
+describe("message list helpers", () => {
+  it("creates a placeholder assistant message", () => {
+    expect(placeholderAssistant(SESSION, "msg_new", 42)).toEqual({
+      info: { id: "msg_new", sessionID: SESSION, role: "assistant", time: { created: 42 } },
+      parts: [],
+    })
+  })
+
+  it("appends messages and updates existing ones without duplicating", () => {
+    let list: ChatMessage[] = []
+    list = upsertMessage(list, chatMessage("msg_1"))
+    list = upsertMessage(list, chatMessage("msg_2"))
+    expect(list.map((message) => message.info.id)).toEqual(["msg_1", "msg_2"])
+
+    const updated = chatMessage("msg_1", [textPart("p", "new")])
+    list = upsertMessage(list, updated)
+    expect(list).toHaveLength(2)
+    expect(list[0]?.parts).toHaveLength(1)
+  })
+
+  it("removes messages by id", () => {
+    const list = [chatMessage("msg_1"), chatMessage("msg_2")]
+    expect(removeMessage(list, "msg_1").map((message) => message.info.id)).toEqual(["msg_2"])
+  })
+})
+
+describe("streaming reducers", () => {
+  it("appends deltas to a new text part", () => {
+    let list = [chatMessage("msg_1")]
+    list = appendDelta(list, { sessionID: SESSION, messageID: "msg_1", ordinal: 0, kind: "text", delta: "hel" }, 5)
+    list = appendDelta(list, { sessionID: SESSION, messageID: "msg_1", ordinal: 0, kind: "text", delta: "lo" }, 6)
+
+    expect(list[0]?.parts).toEqual([
+      { id: "msg_1:text:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "hello" },
+    ])
+  })
+
+  it("appends reasoning deltas to their own part", () => {
+    let list = [chatMessage("msg_1")]
+    list = appendDelta(list, { sessionID: SESSION, messageID: "msg_1", ordinal: 1, kind: "reasoning", delta: "why" }, 5)
+    expect(list[0]?.parts[0]).toMatchObject({ id: "msg_1:reasoning:1", type: "reasoning", text: "why" })
+  })
+
+  it("creates a placeholder message when the target is missing", () => {
+    const list = appendDelta(
+      [],
+      { sessionID: SESSION, messageID: "msg_new", ordinal: 0, kind: "text", delta: "x" },
+      99,
+    )
+    expect(list[0]?.info).toEqual({
+      id: "msg_new",
+      sessionID: SESSION,
+      role: "assistant",
+      time: { created: 99 },
+    })
+    expect(list[0]?.parts).toHaveLength(1)
+  })
+
+  it("leaves a part untouched when its type does not match the stream", () => {
+    const existing = textPart("msg_1:reasoning:0", "already text")
+    const list = [chatMessage("msg_1", [existing])]
+    const next = appendDelta(list, { sessionID: SESSION, messageID: "msg_1", ordinal: 0, kind: "reasoning", delta: "d" })
+    expect(next[0]?.parts).toEqual([existing])
+  })
+
+  it("replaces streamed text with the final text", () => {
+    let list = [chatMessage("msg_1")]
+    list = setStreamText(list, { sessionID: SESSION, messageID: "msg_1", ordinal: 0, kind: "text", text: "final" }, 5)
+    expect(list[0]?.parts).toEqual([
+      { id: "msg_1:text:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "final" },
+    ])
+
+    list = setStreamText(list, { sessionID: SESSION, messageID: "msg_1", ordinal: 0, kind: "text", text: "corrected" }, 6)
+    expect(list[0]?.parts).toHaveLength(1)
+    expect(list[0]?.parts[0]).toMatchObject({ text: "corrected" })
+  })
+
+  it("creates the message and part when setting final text on missing targets", () => {
+    const list = setStreamText(
+      [],
+      { sessionID: SESSION, messageID: "msg_new", ordinal: 2, kind: "reasoning", text: "done" },
+      77,
+    )
+    expect(list[0]?.info.id).toBe("msg_new")
+    expect(list[0]?.parts[0]).toEqual({
+      id: "msg_new:reasoning:2",
+      sessionID: SESSION,
+      messageID: "msg_new",
+      type: "reasoning",
+      text: "done",
+    })
+  })
+})
+
+describe("tool reducers", () => {
+  it("builds tool parts", () => {
+    expect(makeToolPart(SESSION, "msg_1", "call_1", "bash", { status: "pending", input: {} })).toEqual({
+      id: "call_1",
+      sessionID: SESSION,
+      messageID: "msg_1",
+      type: "tool",
+      tool: "bash",
+      callID: "call_1",
+      state: { status: "pending", input: {} },
+    })
+  })
+
+  it("inserts a tool part and replaces it by callID", () => {
+    let list = [chatMessage("msg_1")]
+    list = upsertToolPart(list, SESSION, "msg_1", toolPart("call_1", { status: "pending", input: {} }), 5)
+    expect(list[0]?.parts).toHaveLength(1)
+
+    list = upsertToolPart(list, SESSION, "msg_1", toolPart("call_1", { status: "running", input: { a: 1 } }), 6)
+    expect(list[0]?.parts).toHaveLength(1)
+    expect((list[0]?.parts[0] as ChatToolPart).state.status).toBe("running")
+  })
+
+  it("updates an existing tool part through the updater", () => {
+    const list = [chatMessage("msg_1", [toolPart("call_1", { status: "pending", input: {} })])]
+    const next = updateToolPart(
+      list,
+      SESSION,
+      "msg_1",
+      "call_1",
+      (part) => ({ ...part, state: { ...part.state, status: "running" } }),
+      (part) => part,
+    )
+    expect((next[0]?.parts[0] as ChatToolPart).state.status).toBe("running")
+  })
+
+  it("creates a missing tool part through the fallback", () => {
+    const list = updateToolPart(
+      [chatMessage("msg_1")],
+      SESSION,
+      "msg_1",
+      "call_9",
+      (part) => part,
+      (part) => ({ ...part, tool: "detected", state: { ...part.state, status: "running" } }),
+    )
+    expect(list[0]?.parts[0]).toEqual(
+      toolPart("call_9", { status: "running", input: {} }, "detected"),
+    )
+  })
+
+  it("replaces a full parts snapshot and creates the message when missing", () => {
+    const list = [chatMessage("msg_1", [textPart("old", "old")])]
+    const replaced = replaceParts(list, SESSION, "msg_1", [textPart("new", "new")])
+    expect(replaced[0]?.parts).toEqual([textPart("new", "new")])
+
+    const created = replaceParts([], SESSION, "msg_new", [textPart("p", "x")])
+    expect(created[0]?.info.id).toBe("msg_new")
+    expect(created[0]?.parts).toHaveLength(1)
+  })
+})
+
+describe("setMessageCost", () => {
+  it("stores cost and tokens without touching the timestamps", () => {
+    const list = setMessageCost([chatMessage("msg_1")], SESSION, "msg_1", {
+      cost: 0.25,
+      tokens: tokens(7),
+    })
+    expect(list[0]?.info.cost).toBe(0.25)
+    expect(list[0]?.info.tokens).toEqual(tokens(7))
+    expect(list[0]?.info.time).toEqual({ created: 1 })
+  })
+
+  it("marks the message completed when the step finishes", () => {
+    const list = setMessageCost([chatMessage("msg_1")], SESSION, "msg_1", { finish: "stop" })
+    expect(list[0]?.info.time.completed).toBeTypeOf("number")
+    expect(list[0]?.info.time.streamed).toBeTypeOf("number")
+  })
+
+  it("keeps an existing completion timestamp", () => {
+    const message = chatMessage("msg_1")
+    message.info.time.completed = 3
+    const list = setMessageCost([message], SESSION, "msg_1", { finish: "stop" })
+    expect(list[0]?.info.time.completed).toBe(3)
+  })
+
+  it("creates a placeholder when the message is missing", () => {
+    const list = setMessageCost([], SESSION, "msg_new", { cost: 1 })
+    expect(list[0]?.info).toMatchObject({ id: "msg_new", cost: 1, role: "assistant" })
+    expect(list[0]?.parts).toEqual([])
+  })
+})
 
 describe("sessionUsage", () => {
   it("totals cost and output tokens across assistant messages only", () => {
-    const list: MessageWithParts[] = [
-      { info: userMessage("msg_1"), parts: [] },
-      { info: assistantMessage("msg_2", 0.5, 100), parts: [] },
-      { info: assistantMessage("msg_3", 0.25, 50), parts: [] },
+    const list: ChatMessage[] = [
+      chatMessage("msg_u", [], "user"),
+      { ...chatMessage("msg_a1"), info: { ...chatMessage("msg_a1").info, cost: 0.5, tokens: tokens(100) } },
+      { ...chatMessage("msg_a2"), info: { ...chatMessage("msg_a2").info, cost: 0.25, tokens: tokens(50) } },
     ]
     expect(sessionUsage(list)).toEqual({ cost: 0.75, tokens: 150 })
   })
 
-  it("returns zeroes for an empty session", () => {
+  it("tolerates assistant messages without usage", () => {
+    expect(sessionUsage([chatMessage("msg_a")])).toEqual({ cost: 0, tokens: 0 })
     expect(sessionUsage([])).toEqual({ cost: 0, tokens: 0 })
-  })
-})
-
-describe("mergePart", () => {
-  it("appends the delta when the incoming text matches the current one", () => {
-    const existing = textPart("prt_1", "msg_1", "hello")
-    const incoming = textPart("prt_1", "msg_1", "hello")
-    const merged = mergePart(existing, incoming, " world") as TextPart
-    expect(merged.text).toBe("hello world")
-  })
-
-  it("replaces when the incoming text already contains the full content", () => {
-    const existing = textPart("prt_1", "msg_1", "hello")
-    const incoming = textPart("prt_1", "msg_1", "hello world")
-    const merged = mergePart(existing, incoming, " world") as TextPart
-    expect(merged.text).toBe("hello world")
-  })
-
-  it("leaves non-text parts untouched", () => {
-    const tool: ToolPart = {
-      id: "prt_2",
-      sessionID: "ses_1",
-      messageID: "msg_1",
-      type: "tool",
-      callID: "call_1",
-      tool: "bash",
-      state: { status: "pending", input: {}, raw: "" },
-    }
-    expect(mergePart(undefined, tool, "delta")).toEqual(tool)
-  })
-
-  it("returns the incoming part when there is no existing one", () => {
-    const incoming = textPart("prt_1", "msg_1", "new")
-    expect(mergePart(undefined, incoming, "x")).toEqual(incoming)
-  })
-})
-
-describe("upsertMessage / upsertPart / remove", () => {
-  it("appends messages and updates existing ones without duplicating", () => {
-    let list: MessageWithParts[] = []
-    list = upsertMessage(list, userMessage("msg_1"))
-    list = upsertMessage(list, userMessage("msg_2"))
-    expect(list).toHaveLength(2)
-
-    const updated = { ...userMessage("msg_1"), agent: "plan" }
-    list = upsertMessage(list, updated)
-    expect(list).toHaveLength(2)
-    expect((list[0]?.info as UserMessage).agent).toBe("plan")
-  })
-
-  it("adds new parts and updates existing ones by id", () => {
-    let list: MessageWithParts[] = [{ info: userMessage("msg_1"), parts: [] }]
-    list = upsertPart(list, textPart("prt_1", "msg_1", "hello"))
-    list = upsertPart(list, textPart("prt_2", "msg_1", "world"))
-    expect(list[0]?.parts).toHaveLength(2)
-
-    list = upsertPart(list, textPart("prt_1", "msg_1", "bye"))
-    expect(list[0]?.parts).toHaveLength(2)
-    expect((list[0]?.parts[0] as TextPart).text).toBe("bye")
-  })
-
-  it("ignores parts whose message is not in the list", () => {
-    const list: MessageWithParts[] = [{ info: userMessage("msg_1"), parts: [] }]
-    const next = upsertPart(list, textPart("prt_9", "msg_9", "x"))
-    expect(next).toBe(list)
-  })
-
-  it("removes parts and messages", () => {
-    let list: MessageWithParts[] = [
-      { info: userMessage("msg_1"), parts: [textPart("prt_1", "msg_1", "a"), textPart("prt_2", "msg_1", "b")] },
-    ]
-    list = removePart(list, "msg_1", "prt_1")
-    expect(list[0]?.parts.map((part) => part.id)).toEqual(["prt_2"])
-    list = removeMessage(list, "msg_1")
-    expect(list).toHaveLength(0)
-  })
-})
-
-describe("utilities", () => {
-  it("extracts the directory name", () => {
-    expect(directoryName("/home/user/projects/app")).toBe("app")
-    expect(directoryName("/")).toBe("/")
-  })
-
-  it("splits fenced code blocks", () => {
-    const segments = splitFences("before\n```ts\nconst a = 1\n```\nafter")
-    expect(segments).toHaveLength(3)
-    expect(segments[1]).toMatchObject({ type: "code", language: "ts", content: "const a = 1\n" })
-  })
-
-  it("returns a single text segment without fences", () => {
-    const segments = splitFences("plain text")
-    expect(segments).toEqual([{ type: "text", content: "plain text" }])
   })
 })
 
 describe("message helpers", () => {
   it("joins the text of text parts only", () => {
-    const entry: MessageWithParts = {
-      info: userMessage("msg_1"),
-      parts: [
-        textPart("prt_1", "msg_1", "hello"),
-        { id: "prt_2", sessionID: "ses_1", messageID: "msg_1", type: "step-start" } as Part,
-        textPart("prt_3", "msg_1", "world"),
-      ],
-    }
-    expect(messageText(entry)).toBe("hello\nworld")
+    const message = chatMessage("msg_1", [
+      textPart("p1", "hello"),
+      toolPart("p2", { status: "pending", input: {} }),
+      { id: "p3", sessionID: SESSION, messageID: "msg_1", type: "reasoning", text: "ignored" },
+      textPart("p4", "world"),
+    ])
+    expect(messageText(message)).toBe("hello\nworld")
   })
 
   it("detects a streaming assistant message", () => {
-    const streaming = { ...userMessage("msg_1"), role: "assistant", time: { created: 1 } } as unknown as AssistantMessage
-    const done = { ...streaming, time: { created: 1, completed: 2 } } as unknown as AssistantMessage
-    expect(isStreaming({ info: streaming, parts: [] })).toBe(true)
-    expect(isStreaming({ info: done, parts: [] })).toBe(false)
-    expect(isStreaming({ info: userMessage("msg_2"), parts: [] })).toBe(false)
+    expect(isStreaming(chatMessage("msg_1"))).toBe(true)
+    const done = chatMessage("msg_1")
+    done.info.time.completed = 5
+    expect(isStreaming(done)).toBe(false)
+    expect(isStreaming(chatMessage("msg_u", [], "user"))).toBe(false)
   })
 
-  it("ignores step boundary parts when deciding visibility", () => {
-    const base = { id: "prt", sessionID: "ses_1", messageID: "msg_1" }
-    expect(hasVisibleParts({ info: userMessage("msg_1"), parts: [] })).toBe(false)
-    expect(
-      hasVisibleParts({
-        info: userMessage("msg_1"),
-        parts: [{ ...base, type: "step-start" } as Part, { ...base, type: "step-finish" } as Part],
-      }),
-    ).toBe(false)
-    expect(
-      hasVisibleParts({
-        info: userMessage("msg_1"),
-        parts: [{ ...base, type: "step-start" } as Part, textPart("prt_t", "msg_1", "x")],
-      }),
-    ).toBe(true)
+  it("reports visibility by part count", () => {
+    expect(hasVisibleParts(chatMessage("msg_1"))).toBe(false)
+    expect(hasVisibleParts(chatMessage("msg_1", [textPart("p", "x")]))).toBe(true)
   })
 
   it("labels tool parts by state", () => {
-    const make = (state: unknown): ToolPart =>
-      ({ id: "t", sessionID: "s", messageID: "m", type: "tool", callID: "c", tool: "bash", state }) as ToolPart
-    expect(toolTitle(make({ status: "running", title: "Running ls" }))).toBe("Running ls")
-    expect(toolTitle(make({ status: "running" }))).toBe("Preparing…")
-    expect(toolTitle(make({ status: "completed", title: "Done" }))).toBe("Done")
-    expect(toolTitle(make({ status: "error" }))).toBe("Error")
-    expect(toolTitle(make({ status: "pending" }))).toBe("Preparing…")
+    expect(toolTitle(toolPart("c", { status: "running", input: {}, title: "Running ls" }))).toBe("Running ls")
+    expect(toolTitle(toolPart("c", { status: "running", input: {} }))).toBe("bash")
+    expect(toolTitle(toolPart("c", { status: "completed", input: {}, title: "Done" }))).toBe("Done")
+    expect(toolTitle(toolPart("c", { status: "completed", input: {} }))).toBe("bash")
+    expect(toolTitle(toolPart("c", { status: "error", input: {} }))).toBe("Error")
+    expect(toolTitle(toolPart("c", { status: "pending", input: {} }))).toBe("Preparing…")
+  })
+})
+
+describe("subagent helpers", () => {
+  const subagent = toolPart(
+    "call_1",
+    {
+      status: "completed",
+      input: { agent: "explore", description: "Find files", prompt: "look for x" },
+      output:
+        '<subagent id="ses_child" state="completed">\n<summary>ignored</summary>\n<task_result>found it</task_result>\n</subagent>',
+      metadata: { sessionID: "ses_child", background: false },
+    },
+    "subagent",
+  )
+
+  it("detects only the subagent tool", () => {
+    expect(isTaskTool(subagent)).toBe(true)
+    expect(isTaskTool(toolPart("c", { status: "pending", input: {} }, "bash"))).toBe(false)
+    expect(isTaskTool(textPart("p", "hi"))).toBe(false)
   })
 
-  it("detects and normalizes the task subagent tool", () => {
-    const task: ToolPart = {
-      id: "t",
-      sessionID: "ses_1",
-      messageID: "msg_1",
-      type: "tool",
-      callID: "call_1",
-      tool: "task",
-      state: {
-        status: "completed",
-        input: { subagent_type: "explore", description: "Find files", prompt: "look for x" },
-        output: "<task id=\"ses_child\" state=\"completed\">\n<task_result>found it</task_result>\n</task>",
-        title: "Find files",
-        metadata: { sessionId: "ses_child" },
-        time: { start: 1, end: 2 },
-      },
-    }
-    expect(isTaskTool(task)).toBe(true)
-    expect(isTaskTool({ ...task, tool: "bash" })).toBe(false)
-    expect(isTaskTool(textPart("prt_1", "msg_1", "hi"))).toBe(false)
-
-    expect(subagentInfo(task)).toEqual({
+  it("normalizes the subagent input and metadata", () => {
+    expect(subagentInfo(subagent)).toEqual({
       name: "explore",
       description: "Find files",
       prompt: "look for x",
       sessionID: "ses_child",
       background: false,
     })
-    expect(subagentOutput(task)).toBe("found it")
   })
 
-  it("falls back when a running task has no metadata yet", () => {
-    const running: ToolPart = {
-      id: "t",
-      sessionID: "ses_1",
-      messageID: "msg_1",
-      type: "tool",
-      callID: "call_1",
-      tool: "task",
-      state: {
+  it("falls back when a running subagent has no metadata yet", () => {
+    const running = toolPart(
+      "call_2",
+      {
         status: "running",
-        input: {},
+        input: { agent: "" },
         title: "Working",
-        metadata: { sessionId: "ses_child", background: true },
-        time: { start: 1 },
+        metadata: { sessionId: "ses_x", background: true },
       },
-    }
-    expect(subagentInfo(running)).toMatchObject({ name: "subagent", description: "Working", background: true })
+      "subagent",
+    )
+    expect(subagentInfo(running)).toEqual({
+      name: "subagent",
+      description: "Working",
+      prompt: null,
+      sessionID: "ses_x",
+      background: true,
+    })
+  })
+
+  it("falls back to the tool title when input and metadata are empty", () => {
+    const empty = toolPart("call_3", { status: "pending", input: {} }, "subagent")
+    expect(subagentInfo(empty)).toEqual({
+      name: "subagent",
+      description: "Preparing…",
+      prompt: null,
+      sessionID: null,
+      background: false,
+    })
+  })
+
+  it("strips the subagent wrapper tags from completed output", () => {
+    expect(subagentOutput(subagent)).toBe("found it")
+    expect(
+      subagentOutput(
+        toolPart(
+          "call_4",
+          {
+            status: "completed",
+            input: {},
+            output: '<task id="x">\n<task_result>done</task_result>\n</task>',
+          },
+          "subagent",
+        ),
+      ),
+    ).toBe("done")
+  })
+
+  it("returns null without completed output", () => {
+    const running = toolPart("call_5", { status: "running", input: {} }, "subagent")
     expect(subagentOutput(running)).toBeNull()
+    expect(
+      subagentOutput(toolPart("call_6", { status: "completed", input: {} }, "subagent")),
+    ).toBeNull()
+    expect(
+      subagentOutput(
+        toolPart(
+          "call_7",
+          {
+            status: "completed",
+            input: {},
+            output: "<task><task_result>   </task_result></task>",
+          },
+          "subagent",
+        ),
+      ),
+    ).toBeNull()
+  })
+})
+
+describe("formatting utilities", () => {
+  it("extracts the directory name", () => {
+    expect(directoryName("/home/user/projects/app")).toBe("app")
+    expect(directoryName("/home/user/projects/app/")).toBe("app")
+    expect(directoryName("/")).toBe("/")
+    expect(directoryName("")).toBe("")
   })
 
   it("formats relative timestamps", () => {
     const now = 10_000_000_000
     expect(formatRelative(now, now)).toBe("now")
+    expect(formatRelative(now + 5_000, now)).toBe("now")
     expect(formatRelative(now - 5 * 60_000, now)).toBe("5 min ago")
     expect(formatRelative(now - 3 * 3_600_000, now)).toBe("3 h ago")
     expect(formatRelative(now - 2 * 86_400_000, now)).toBe("2 d ago")
     expect(formatRelative(now - 40 * 86_400_000, now)).toBe(new Date(now - 40 * 86_400_000).toLocaleDateString())
   })
-})
 
-export type { Part, Message }
+  it("splits fenced code blocks", () => {
+    const segments = splitFences("before\n```ts\nconst a = 1\n```\nafter")
+    expect(segments).toEqual([
+      { type: "text", content: "before\n" },
+      { type: "code", language: "ts", content: "const a = 1\n" },
+      { type: "text", content: "\nafter" },
+    ])
+  })
+
+  it("handles fences without a language and drops blank segments", () => {
+    const segments = splitFences("```\ncode\n```")
+    expect(segments).toEqual([{ type: "code", language: undefined, content: "code\n" }])
+
+    expect(splitFences("   ")).toEqual([])
+  })
+
+  it("returns a single text segment without fences", () => {
+    expect(splitFences("plain text")).toEqual([{ type: "text", content: "plain text" }])
+  })
+})

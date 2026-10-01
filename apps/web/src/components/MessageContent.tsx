@@ -5,11 +5,12 @@ import {
   subagentInfo,
   subagentOutput,
   toolTitle,
-  type MessageWithParts,
-  type ReasoningPart,
-  type SubtaskPart,
-  type TextPart,
-  type ToolPart,
+  type ChatMessage,
+  type ChatPart,
+  type ChatReasoningPart,
+  type ChatSubtaskPart,
+  type ChatTextPart,
+  type ChatToolPart,
 } from "@masterhand/client-core"
 
 function MarkdownText({ text }: { text: string }) {
@@ -34,7 +35,7 @@ function MarkdownText({ text }: { text: string }) {
   )
 }
 
-function ReasoningBlock({ part }: { part: ReasoningPart }) {
+function ReasoningBlock({ part }: { part: ChatReasoningPart }) {
   return (
     <details className="text-sm text-zinc-500">
       <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide">Reasoning</summary>
@@ -43,7 +44,7 @@ function ReasoningBlock({ part }: { part: ReasoningPart }) {
   )
 }
 
-function statusDot(status: ToolPart["state"]["status"]): string {
+function statusDot(status: ChatToolPart["state"]["status"]): string {
   return status === "completed"
     ? "bg-emerald-400"
     : status === "error"
@@ -53,7 +54,7 @@ function statusDot(status: ToolPart["state"]["status"]): string {
         : "bg-zinc-600"
 }
 
-function ToolCall({ part }: { part: ToolPart }) {
+function ToolCall({ part }: { part: ChatToolPart }) {
   const [open, setOpen] = useState(false)
   const state = part.state
   const dot = statusDot(state.status)
@@ -89,7 +90,7 @@ function SubagentCall({
   part,
   onOpenSession,
 }: {
-  part: ToolPart
+  part: ChatToolPart
   onOpenSession?: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -153,7 +154,7 @@ function SubagentCall({
   )
 }
 
-function SubtaskCall({ part }: { part: SubtaskPart }) {
+function SubtaskCall({ part }: { part: ChatSubtaskPart }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/5">
@@ -183,30 +184,30 @@ function PartView({
   part,
   onOpenSession,
 }: {
-  part: MessageWithParts["parts"][number]
+  part: ChatPart
   onOpenSession?: (id: string) => void
 }) {
   switch (part.type) {
     case "text":
-      return <MarkdownText text={(part as TextPart).text} />
+      return <MarkdownText text={part.text} />
     case "reasoning":
-      return <ReasoningBlock part={part as ReasoningPart} />
+      return <ReasoningBlock part={part} />
     case "tool":
       return isTaskTool(part) ? (
         <SubagentCall part={part} onOpenSession={onOpenSession} />
       ) : (
-        <ToolCall part={part as ToolPart} />
+        <ToolCall part={part} />
       )
     case "subtask":
-      return <SubtaskCall part={part as SubtaskPart} />
+      return <SubtaskCall part={part} />
     default:
       return null
   }
 }
 
-export function UserBubble({ entry }: { entry: MessageWithParts }) {
+export function UserBubble({ entry }: { entry: ChatMessage }) {
   const text = entry.parts
-    .filter((part): part is TextPart => part.type === "text")
+    .filter((part): part is ChatTextPart => part.type === "text")
     .map((part) => part.text)
     .join("\n")
   if (!text.trim()) return null
@@ -223,16 +224,13 @@ export function AssistantBlock({
   entry,
   onOpenSession,
 }: {
-  entry: MessageWithParts
+  entry: ChatMessage
   onOpenSession?: (id: string) => void
 }) {
-  const visible = entry.parts.filter((part) => part.type !== "step-start" && part.type !== "step-finish")
+  const visible = entry.parts
   const info = entry.info
-  const streaming = info.role === "assistant" && info.time.completed === undefined
-  const assistant = info.role === "assistant" ? info : null
-  const errorMessage = assistant?.error
-    ? String((assistant.error as { data?: { message?: string } }).data?.message ?? "Agent error")
-    : null
+  const streaming = info.time.completed === undefined
+  const errorMessage = info.error ? info.error.message || "Agent error" : null
 
   return (
     <div className="flex flex-col gap-2">
@@ -248,11 +246,11 @@ export function AssistantBlock({
 
       {errorMessage && <p className="text-sm text-red-400">{errorMessage}</p>}
 
-      {assistant && assistant.time.completed !== undefined && (
+      {info.time.completed !== undefined && (
         <p className="text-xs text-zinc-600">
-          {assistant.modelID}
-          {assistant.cost > 0 ? ` · $${assistant.cost.toFixed(4)}` : ""}
-          {assistant.tokens.output > 0 ? ` · ${assistant.tokens.output} tok` : ""}
+          {info.modelID}
+          {(info.cost ?? 0) > 0 ? ` · $${(info.cost ?? 0).toFixed(4)}` : ""}
+          {(info.tokens?.output ?? 0) > 0 ? ` · ${info.tokens?.output} tok` : ""}
         </p>
       )}
     </div>

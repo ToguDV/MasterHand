@@ -92,7 +92,7 @@ function spawnChild(label, command, args) {
     if (error.code === "ENOENT") {
       console.error(`[dev] ${label}: command not found (${command})`)
       if (label === "opencode") {
-        console.error("[dev] install opencode (https://opencode.ai/docs/) or set MASTERHAND_SKIP_OPENCODE=1")
+        console.error("[dev] install opencode v2 (npm install -g @opencode/cli) or set MASTERHAND_SKIP_OPENCODE=1")
       }
     } else {
       console.error(`[dev] ${label} failed: ${error.message}`)

@@ -34,18 +34,22 @@ afterEach(() => {
 })
 
 describe("createEventHub", () => {
-  it("forwards normalized events to subscribers and the global hook", async () => {
+  it("forwards v2 events to subscribers and the global hook, dropping invalid frames", async () => {
+    const event = { id: "evt_1", type: "session.idle", data: { sessionID: "ses_1" } }
+    const fetchImpl = vi.fn(async () =>
+      sseResponse([
+        "data: not-json\n\n",
+        `data: ${JSON.stringify({ id: "evt_bad", data: { ignored: true } })}\n\n`,
+        `data: ${JSON.stringify(event)}\n\n`,
+      ]),
+    )
     const onEvent = vi.fn()
     hub = createEventHub({
-      url: "http://upstream/event",
+      url: "http://upstream/api/event",
       reconnectBaseMs: 5,
       reconnectMaxMs: 10,
       onEvent,
-      fetchImpl: async () =>
-        sseResponse([
-          `data: ${JSON.stringify({ payload: { type: "session.idle", properties: { sessionID: "ses_1" } } })}\n\n`,
-          `data: ${JSON.stringify({ payload: { type: "sync", syncEvent: {} } })}\n\n`,
-        ]),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
     })
     const received: unknown[] = []
     const unsubscribe = hub.subscribe((event) => received.push(event))
@@ -53,16 +57,19 @@ describe("createEventHub", () => {
     hub.start()
     await waitFor(() => onEvent.mock.calls.length > 0)
 
-    expect(received).toEqual([{ type: "session.idle", properties: { sessionID: "ses_1" } }])
-    expect(onEvent).toHaveBeenCalledWith({ type: "session.idle", properties: { sessionID: "ses_1" } })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://upstream/api/event",
+      expect.objectContaining({ headers: expect.objectContaining({ accept: "text/event-stream" }) }),
+    )
+    expect(received).toEqual([event])
+    expect(onEvent).toHaveBeenCalledWith(event)
 
     unsubscribe()
-    expect(hub.connected).toBe(false)
   })
 
   it("keeps notifying healthy listeners when one throws", async () => {
     hub = createEventHub({
-      url: "http://upstream/event",
+      url: "http://upstream/api/event",
       reconnectBaseMs: 5,
       reconnectMaxMs: 10,
       fetchImpl: async () => sseResponse([`data: ${JSON.stringify({ type: "server.connected" })}\n\n`]),
@@ -81,7 +88,7 @@ describe("createEventHub", () => {
   it("forwards the upstream auth header", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 500 }))
     hub = createEventHub({
-      url: "http://upstream/event",
+      url: "http://upstream/api/event",
       authHeader: "Basic abc",
       reconnectBaseMs: 5,
       reconnectMaxMs: 10,
@@ -91,7 +98,7 @@ describe("createEventHub", () => {
     hub.start()
     await waitFor(() => fetchImpl.mock.calls.length > 0)
     expect(fetchImpl).toHaveBeenCalledWith(
-      "http://upstream/event",
+      "http://upstream/api/event",
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Basic abc" }) }),
     )
   })
@@ -99,7 +106,7 @@ describe("createEventHub", () => {
   it("retries with backoff after a failed upstream response", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 502 }))
     hub = createEventHub({
-      url: "http://upstream/event",
+      url: "http://upstream/api/event",
       reconnectBaseMs: 5,
       reconnectMaxMs: 10,
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -116,7 +123,7 @@ describe("createEventHub", () => {
   it("does not start again after being stopped", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 500 }))
     hub = createEventHub({
-      url: "http://upstream/event",
+      url: "http://upstream/api/event",
       reconnectBaseMs: 5,
       reconnectMaxMs: 10,
       fetchImpl: fetchImpl as unknown as typeof fetch,

@@ -21,7 +21,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
                   │              │  · SSE relay /api/events
                   │              │  · SQLite (devices/tokens)
                   └────┬─────────┘
-                       │ SSE /global/event (permanent connection)
+                       │ SSE /api/event (permanent connection)
                        ▼
                   ┌──────────────┐
                   │ opencode     │  4096 (internal network only)
@@ -42,7 +42,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 | Web client | `apps/web` | React 19 + Vite + TS + Tailwind | Browser UI: sessions, chat, streaming, permission modal |
 | Desktop client | `apps/desktop` | Electron (main process, hardened renderer) | Thin shell that loads the BFF-served web app (`MASTERHAND_URL`, default `http://localhost:8787`) with navigation locked to that origin |
 | Mobile client | `apps/mobile` | React Native + Expo | Native iOS/Android UI (login with device token, workspace picker, sessions with delete, chat, permissions) |
-| `packages/client-core` | TypeScript (framework-agnostic + React hooks) | API client, TanStack Query hooks, SSE handling, auth adapters, generated opencode types |
+| `packages/client-core` | TypeScript (framework-agnostic + React hooks) | API client, TanStack Query hooks, SSE handling, auth adapters, opencode v2 generated client and types |
 | BFF | `apps/server` | Node 22 + Hono (`@hono/node-server`) | Auth (cookie + token), proxy to opencode, SSE relay, device/token storage, rate limit, workspaces and git worktrees |
 | Agent engine | `opencode` container | `opencode serve` (pinned version) | Runs agents and tools; OpenAPI 3.1 + SSE; data on volumes |
 | TLS / reverse proxy | Deployer-owned | Any | TLS termination and security headers; out of the repository's scope |
@@ -58,7 +58,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 | Desktop | Electron loading the deployed web app | Reuses the whole web UI with minimal extra code; keeps cookies same-origin |
 | Shared logic | `packages/client-core` | One API/query/SSE layer reused by all clients; platform UI stays free |
 | UI styling | Tailwind v4 (web) / RN primitives (mobile) | Mobile-first, no lock-in |
-| API client | `@opencode-ai/sdk` pointed at the BFF proxy | Generated types from opencode's OpenAPI; the BFF injects auth |
+| API client | `@opencode/client` (v2, Promise) pointed at the BFF proxy | Generated client and types from opencode's v2 contract; the BFF injects auth |
 | State | TanStack Query | Event-driven server cache (SSE → `setQueryData`); works on web and React Native |
 | BFF | Node 22 + Hono | Lightweight `streamSSE` and proxying |
 | Auth | Signed HttpOnly cookie (web) + signed Bearer token (native) | Best fit per platform; single signing secret |
@@ -69,20 +69,20 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 
 ### 4.1 Prompt submission and streaming
 
-1. The client sends `POST /api/oc/session/:id/prompt_async` through the BFF (which adds opencode's basic auth). The body may include `model`, `agent` and `variant` (model variant = reasoning effort, e.g. `low`/`high`/`max`).
-2. opencode returns `204` and runs the agent.
-3. The BFF keeps a permanent SSE connection to opencode's `GET /global/event` (all projects; unwraps the `{ directory, project, payload }` envelope and drops `sync` events) and re-emits it on the BFF's `GET /api/events`.
-4. The client listens for `message.part.updated` (`{ part, delta? }`) and renders live streaming.
-5. When the turn ends, opencode emits `session.idle` (`{ sessionID }`).
+1. The client sends `POST /api/oc/api/session/:id/prompt` through the BFF (which adds opencode's basic auth). Model and agent are **not** part of the prompt: when the composer selection differs from the session's remembered `agent`/`model`, the client first calls `POST /api/oc/api/session/:id/agent` and/or `/model` (with the variant inside `Model.Ref`) and only then prompts.
+2. opencode admits the input and returns the inbox item; the agent runs.
+3. The BFF keeps a permanent SSE connection to opencode's `GET /api/event` (all locations; each frame is one v2 event object) and re-emits it on the BFF's `GET /api/events`.
+4. The client renders live streaming from the granular events: `session.text.*` and `session.reasoning.*` deltas (keyed by `assistantMessageID` + `ordinal`), `session.tool.*` for tool cards and `session.step.ended` for cost/tokens.
+5. When the turn ends, opencode emits `session.execution.succeeded` (or `failed`/`interrupted`); the client refetches the projected messages, which replace the live state.
 6. Each composer remembers the agent, model and effort (`variant`) chosen **per session**, stored client-side (`localStorage` on web, SecureStore on mobile) and restored when the session is reopened; new sessions keep falling back to the last used model.
 
 ### 4.2 Permission approvals
 
-1. The agent requests permission → `permission.asked` event with `properties: Permission` (`id`, `sessionID`, `permission`, `patterns`, `metadata`, `always`, `tool.{messageID,callID}`). Verified against opencode 1.18.32; the published SDK types still describe the older `permission.updated` payload, which the server no longer emits.
-2. The client shows a modal with the context.
-3. The user answers → `POST /api/oc/session/:id/permissions/:permissionID` with `{ response }` (`once` / `always` / `reject`). The session id resolves the request, so no directory override is needed.
+1. The agent requests permission → `permission.asked` event with `Permission.Request` (`id`, `sessionID`, `action`, `resources`, `save?`, `metadata?`, `source?`).
+2. The client shows a modal with the action and affected resources.
+3. The user answers → `POST /api/oc/api/session/:id/permission/:requestID/reply` with `{ decision }` (`once` / `always` / `reject`). The session id resolves the request.
 4. opencode emits `permission.replied` (`{ sessionID, requestID, reply }`) and all devices sync.
-5. SSE does not replay across reconnects, so on (re)connect clients reconcile pending requests with `GET /api/oc/permission?directory=<workspace>` for every workspace; otherwise a missed `permission.asked` would leave the agent blocked with no UI.
+5. SSE does not replay across reconnects, so on (re)connect clients reconcile pending requests with `GET /api/oc/api/permission/request?location[directory]=<workspace>` for every workspace; otherwise a missed `permission.asked` would leave the agent blocked with no UI.
 6. Optional per-session **auto-accept** (a toggle next to the composer, stored client-side): incoming requests for that session are answered `once` automatically and the queue is drained on (re)connect. It is reversible — `once` never persists a rule in opencode — and only affects sessions the user enabled it for.
 
 ### 4.3 Authentication (single user, multiple devices)
@@ -95,26 +95,26 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 
 ### 4.4 Notifications (in-app)
 
-- The BFF's SSE relay drives in-app notifications in every client: `session.idle`, `permission.asked` and `session.error` update a badge/indicator.
+- The BFF's SSE relay drives in-app notifications in every client: `session.idle`, `session.execution.failed` (agent error) and `permission.asked` update a badge/indicator.
 - Tapping a notification opens the corresponding session.
 - Native push (FCM/APNs) is out of scope for the MVP and listed in the backlog.
 
 ### 4.5 Reconnection (mobile / background)
 
 - SSE does not guarantee event replay.
-- On reconnect (or when returning from background), clients refetch `GET /session/:id/message` and deduplicate by `part.id`.
-- `message.part.updated` is applied with a merge by `part.id`: if the incoming text matches the local text, `delta` is appended; if a full snapshot arrives, it replaces (supports both server modes).
+- On reconnect (or when returning from background), clients refetch `GET /api/oc/api/session/:id/message` and replace their live state with the projection.
+- Streaming events are keyed: text/reasoning by `assistantMessageID` + `ordinal`, tool parts by their call `id`. Deltas append; `*.ended` carries the final text; tool `success`/`failed` carries the result `content`.
 - Client inactivity watchdog (60s without bytes → forced reconnect), reconnect when the tab/app becomes visible (`visibilitychange`) and when the network returns (`online`).
 - On (re)connect, `sessions`, `messages` and `statuses` are invalidated to reconcile missed events.
-- Pending permissions are reconciled too (`GET /api/oc/permission` per workspace): a `permission.asked` lost while offline would otherwise leave the agent blocked with no prompt.
+- Pending permissions are reconciled too (`GET /api/oc/api/permission/request` per workspace): a `permission.asked` lost while offline would otherwise leave the agent blocked with no prompt.
 - Fallback without SSE: connection down → polling (messages every 5s, statuses every 4s); active turn → messages every 3s.
 
 ### 4.6 Workspaces (isolated project folders)
 
 - There is a single **workspaces root** (`WORKSPACES_ROOT`, default `<repo-root>/workspace`; `/workspace` in Docker), the folder opencode works in. Every **workspace** is a subfolder of it, tracked in the BFF (`workspaces` table in SQLite: `id`, `name`, `path`). Relative values are resolved against the repo root, so the path does not depend on the process `cwd`.
 - Clients only send a **name**; the BFF sanitizes it to a single path segment (no separators, traversal or leading dots), derives `<root>/<name>` and creates the folder with `mkdir -p`. The name and the folder are the same, so arbitrary absolute paths can never be registered and everything stays isolated under the root.
-- Clients pick a workspace; every opencode call carries its `path` as the `directory` override (query on GET, `x-opencode-directory` header on mutations). Sessions are therefore created in and listed for the selected folder.
-- Deleting a workspace forgets it in MasterHand. With `?deleteFiles=1` (a checkbox in the UI) the BFF also removes the folder and its files; it refuses (`403`) when the stored path lies outside the root. Deleting a session calls `DELETE /session/:id` with the workspace directory and removes its data.
+- Clients pick a workspace; every opencode **location-scoped** call carries its `path` as `?location[directory]=`, session listing uses `?directory=` and session creation sends `location: { directory }` in the body. Sessions are therefore created in and listed for the selected folder.
+- Deleting a workspace forgets it in MasterHand. With `?deleteFiles=1` (a checkbox in the UI) the BFF also removes the folder and its files; it refuses (`403`) when the stored path lies outside the root. Deleting a session calls `DELETE /api/session/:id` (the session id resolves its location) and removes its data.
 - The BFF persists the list and owns folder creation/deletion; opencode works inside the same mounted root.
 
 ### 4.7 Isolated sessions (git worktrees)
@@ -133,7 +133,7 @@ Several agents working in the same workspace share its folder, so they can overw
 The agent usually runs a web project's dev server inside its own process/container, whose port the user's browser cannot reach. **Previews** expose it without publishing any port:
 
 1. On first use, the BFF reserves a **fixed port** per session from `PREVIEW_PORT_RANGE` (persisted in the `preview_ports` table). Fixed ports survive BFF restarts and let a running dev server be re-exposed without restarting it. The allocator recycles the oldest mapping without a live tunnel when the pool is drained.
-2. While previews are enabled, the `/api/oc` proxy appends a `system` instruction to every prompt of that session (opencode merges `system` into the model's system prompt — verified against v1.18.34), telling the agent to bind any web server to `0.0.0.0:<port>`. No project files (`AGENTS.md`, `opencode.json`) are touched.
+2. While previews are enabled, the BFF writes one session instruction entry (`PUT /api/experimental/session/:id/instructions/entries/masterhand.preview`, key `masterhand.preview`) telling the agent to bind any web server to `0.0.0.0:<port>`; opencode includes instruction entries in the model's system context on every turn. No project files (`AGENTS.md`, `opencode.json`) are touched and the proxy stays a byte-for-byte passthrough.
 3. On an explicit **Start**, the BFF probes `PREVIEW_ORIGIN:<port>` over TCP and then spawns `cloudflared tunnel --no-autoupdate --url http://<origin>:<port> --http-host-header localhost:<port>` inside the BFF container, capturing the random `https://<name>.trycloudflare.com` URL from its output. The `Host` rewrite is what makes framework dev servers work through the tunnel: Vite's `server.allowedHosts` (and similar origin checks) reject the public hostname with `403`, while `localhost` is always allowed. The URL is served to clients, which embed it in an iframe (web/desktop) or a WebView (mobile). **Stop** kills the process; session deletion and BFF shutdown clean up too.
 4. `PREVIEW_ORIGIN` is the host of the dev server as seen by the BFF: `opencode` on the Compose network, `127.0.0.1` in native dev. The quick tunnel makes an **outbound** connection to Cloudflare, so no inbound ports or DNS/certificates are needed.
 
@@ -174,7 +174,7 @@ deploy/
 - Agents work under `./workspace` (bind mount) so files can be inspected/versioned from the host; the BFF creates one subfolder per workspace there and per-session git worktrees under `.worktrees/` (same mount, so opencode sees them).
 - Backups: volumes `masterhand_data`, `opencode_data` and `opencode_config`.
 - Session previews: the `masterhand` image bundles `cloudflared`; Compose sets `PREVIEW_ORIGIN=opencode`, so the tunnel targets the dev server inside the opencode container. The BFF needs **outbound Internet** and the agent must bind the reserved port to `0.0.0.0`. Set `PREVIEW_ENABLED=false` to disable the feature.
-- Upgrade: opencode pinned; `docker compose build && docker compose up -d`.
+- Upgrade: opencode is pinned (`OPENCODE_VERSION`, v2); `docker compose build && docker compose up -d`. **Back up the `opencode_data` volume before the first v2 start**: v2 migrates v1 session data on boot and the beta warns data may be reset. Track the migration with `GET /api/experimental/migration/v1`.
 - See `docs/runbooks/deployment.md` for concrete TLS options.
 
 ## 7. Decisions (ADR-lite)
@@ -194,7 +194,8 @@ deploy/
 | ADR-11 | Workspaces are subfolders MasterHand creates under a single configured root; the BFF owns the records and the folders, and opencode is targeted per request with its `directory` override | opencode has no project-deletion endpoint, so a deletable "workspace" must be owned by MasterHand; deriving the path from a sanitized name keeps every project isolated under one root and removes unsafe absolute paths | Registering arbitrary existing absolute paths (escapes the root, requires the user to pre-create folders), listing `GET /project` directly (no deletion possible), opencode's experimental v2 workspaces (git worktrees, not folders, unstable) |
 | ADR-12 | Isolated sessions use BFF-managed git worktrees, opt-in per session, with a branch per session and an explicit Finish & PR action (no auto-merge) | Git worktrees are the natural way to give concurrent agents disjoint files; the BFF already owns workspaces and opencode accepts a per-request `directory`, so no unstable opencode API is needed. Opt-in avoids a worktree/branch per throwaway session, and a manual finish avoids surprising merges | Automatic worktree per session (branch/disk bloat), one workspace per session (no merge path, manual), opencode v2 worktree/workspace API (experimental, not in the pinned version), per-workspace lock (kills parallelism) |
 | ADR-13 | Previews use Cloudflare quick tunnels managed by the BFF, with a fixed reserved port injected per session through the prompt's `system` field and an explicit Start/Stop | Quick tunnels need no DNS, certificates or published ports and work from any network (web, desktop and native clients), which is exactly the "show me the dev server" use case. A fixed per-session port survives restarts and lets the agent be told once, while the BFF stays the only process managing the tunnel. | BFF reverse proxy with path prefixes (breaks absolute asset paths and HMR), wildcard preview subdomain (requires deployer DNS/TLS work), publishing host ports (mixed content, exposed surface), named tunnels (account/API token) |
-| ADR-14 | Prompt preview instructions are injected by the BFF as the per-prompt `system` field, not by editing workspace files | The port is per session (isolated worktrees run concurrently), and `system` is merged (not replaced) by opencode, so it composes with the user's own prompt and leaves the project's files untouched | Writing `AGENTS.md`/`opencode.json` into the workspace (mutates user files, per-workspace not per-session), client-side injection (duplicated in every client) |
+| ADR-14 | Preview instructions are written by the BFF as a **session instruction entry** (`masterhand.preview`), not as a per-prompt `system` and not by editing workspace files | opencode v2 has no per-prompt `system`; instruction entries are per session (isolated worktrees run concurrently) and become part of the system context without touching project files or making the proxy parse bodies | Writing `AGENTS.md`/`opencode.json` into the workspace (mutates user files, per-workspace not per-session), client-side injection (duplicated in every client), `session.synthetic` messages (visible in the transcript) |
+| ADR-15 | Champion opencode **v2 only**: `@opencode/client` (generated), the `/api/*` server API and the granular `session.*` events; the BFF stays a passthrough + single-upstream hub | v2 is the released engine (v1 is no longer installed side by side), the generated client removes hand-rolled location/query/SSE drift, and the granular events are the native streaming contract. A dual v1/v2 adapter would double the test matrix for a superseded API | Dual v1+v2 compatibility layer (more code/tests, no user value), staying on v1 (unsupported, pinned old server), adopting v2's experimental worktree/workspace APIs (BFF-owned worktrees already work) |
 
 ## 8. Risks
 

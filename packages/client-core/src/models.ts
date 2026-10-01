@@ -1,4 +1,4 @@
-import type { AgentInfo, ProvidersResponse, Session } from "./types"
+import type { AgentInfo, ModelInfo, ModelRef, ProviderInfo, Session } from "./types"
 
 export interface FlatModelOption {
   value: string
@@ -10,17 +10,16 @@ export function selectableAgents(agents: AgentInfo[]): AgentInfo[] {
   return agents.filter((agent) => agent.mode !== "subagent" && agent.hidden !== true)
 }
 
-export function flattenModels(providers: ProvidersResponse["providers"]): FlatModelOption[] {
-  const options: FlatModelOption[] = []
-  for (const provider of providers) {
-    for (const model of Object.values(provider.models)) {
-      options.push({
-        value: `${provider.id}/${model.id}`,
-        label: `${provider.name} · ${model.name || model.id}`,
-        variants: Object.keys(model.variants ?? {}),
-      })
-    }
-  }
+/** Flattens the v2 model catalog into the options the composer selectors use. */
+export function flattenModels(models: ModelInfo[], providers: ProviderInfo[]): FlatModelOption[] {
+  const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]))
+  const options = models
+    .filter((model) => model.enabled !== false)
+    .map((model) => ({
+      value: `${model.providerID}/${model.id}`,
+      label: `${providerNames.get(model.providerID) ?? model.providerID} · ${model.name || model.id}`,
+      variants: model.variants.map((variant) => variant.id),
+    }))
   return options.sort((a, b) => a.label.localeCompare(b.label))
 }
 
@@ -41,15 +40,13 @@ export function variantLabel(key: string): string {
 }
 
 export function defaultModelValue(
-  configModel: string | undefined,
-  defaults: Record<string, string>,
+  defaultModel: ModelInfo | null,
   options: FlatModelOption[],
   preferred?: string,
 ): string {
   if (preferred && options.some((option) => option.value === preferred)) return preferred
-  if (configModel && options.some((option) => option.value === configModel)) return configModel
-  for (const [providerID, modelID] of Object.entries(defaults)) {
-    const value = `${providerID}/${modelID}`
+  if (defaultModel) {
+    const value = `${defaultModel.providerID}/${defaultModel.id}`
     if (options.some((option) => option.value === value)) return value
   }
   return options[0]?.value ?? ""
@@ -75,8 +72,11 @@ export function recentModelValue(sessions: Session[], options: FlatModelOption[]
   return best?.value
 }
 
-export function parseModel(value: string): { providerID: string; modelID: string } | undefined {
+/** Parses a `provider/model` composer value; the variant travels separately. */
+export function parseModel(value: string, variant?: string): ModelRef | undefined {
   const index = value.indexOf("/")
   if (index === -1) return undefined
-  return { providerID: value.slice(0, index), modelID: value.slice(index + 1) }
+  const model: ModelRef = { providerID: value.slice(0, index), id: value.slice(index + 1) }
+  if (variant) model.variant = variant
+  return model
 }

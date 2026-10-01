@@ -1,97 +1,98 @@
 # opencode HTTP API (subset for MasterHand)
 
-Verified on **2026-09-27** against the [official server docs](https://opencode.ai/docs/server/) and [`types.gen.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/sdk/js/src/gen/types.gen.ts).
+Verified on **2026-10-01** against a live **opencode v2.0.6** server and the generated types from [`@opencode/client@2.0.21`](https://www.npmjs.com/package/@opencode/client). The OpenAPI 3.1 contract is published by the server itself at `/doc`.
 
-> The full contract (OpenAPI 3.1) is at `http://127.0.0.1:4096/doc` on the server. When in doubt, that is the source of truth.
+> MasterHand targets opencode **v2 only**. The v1 server API (`/session`, `/global/event`, `x-opencode-directory`, `prompt_async`, per-prompt `system`, …) is not used anymore.
 
 ## Authentication
 
-- Basic auth with `OPENCODE_SERVER_PASSWORD` (default user `opencode`, configurable with `OPENCODE_SERVER_USERNAME`).
-- In MasterHand, **only the BFF** knows these credentials and injects them when proxying. Clients never see them.
+- HTTP basic auth with `OPENCODE_SERVER_PASSWORD` (default user `opencode`, configurable with `OPENCODE_SERVER_USERNAME`). Unchanged from v1.
+- Only the BFF knows these credentials and injects them when proxying. Clients never see them.
+- `opencode serve --hostname 0.0.0.0 --port 4096` runs the same server used in Docker.
 
 ## Endpoints MasterHand uses
 
-### Health and events
+Everything lives under `/api/*`. The BFF proxy strips its own `/api/oc` prefix, so `client-core` calls opencode through `/api/oc/api/...` (e.g. `/api/oc/api/info` → `GET /api/info`).
+
+### Health, locations and events
 
 | Method | Route | Usage in MasterHand |
 |---|---|---|
-| `GET` | `/global/health` | BFF and UI healthcheck |
-| `GET` | `/event` | Instance SSE → relayed on `/api/events` |
-| `GET` | `/global/event` | Global SSE (**what MasterHand uses**) |
+| `GET` | `/api/info` | Health/version (`{ version, pid, urls, paths }`); replaces `/global/health` |
+| `GET` | `/api/event` | SSE stream of every event (**the one MasterHand uses**); replaces `/global/event` |
+| `GET` | `/api/location` | Resolve a location (not used directly: sessions carry theirs) |
 
 ### Sessions
 
 | Method | Route | Usage in MasterHand |
 |---|---|---|
-| `GET` | `/session` | List sessions |
-| `POST` | `/session` | Create session; body `{ parentID?, title? }` |
-| `GET` | `/session/:id` | Session detail |
-| `DELETE` | `/session/:id` | Delete session |
-| `PATCH` | `/session/:id` | Rename; body `{ title? }` |
-| `GET` | `/session/status` | State of all sessions (idle/busy) |
-| `GET` | `/session/:id/message` | History; returns `{ info, parts }[]` |
-| `POST` | `/session/:id/prompt_async` | **Send prompt without waiting (204); main UI flow** |
-| `POST` | `/session/:id/message` | Send prompt and wait for the full response (alternative) |
-| `POST` | `/session/:id/abort` | Stop an in-progress turn |
-| `GET` | `/permission` | Pending permission requests; `?directory=` scopes it to one project (used to reconcile missed events) |
-| `POST` | `/session/:id/permissions/:permissionID` | Answer permission; body `{ response: "once" \| "always" \| "reject" }` |
-| `GET` | `/session/:id/diff` | Session diffs (post-MVP) |
-| `POST` | `/session/:id/summarize` | Summary (post-MVP) |
-| `POST` | `/session/:id/revert` · `/unrevert` | Revert/restore messages (post-MVP) |
-| `GET` | `/session/:id/todo` | Session tasks (post-MVP) |
+| `GET` | `/api/session` | List sessions. Query: `directory`, `limit`, `order`, `search`, `parentID`, `cursor`; responds `{ data, cursor: { previous, next } }` (newest 50 by default). A cursor cannot be combined with `order` |
+| `POST` | `/api/session` | Create session; body `{ title?, agent?, model?, location: { directory } }`; responds `{ data: SessionInfo }` |
+| `GET` | `/api/session/:id` | Session detail (`{ data }`) |
+| `PATCH` | `/api/session/:id` | Rename / metadata / permissions |
+| `DELETE` | `/api/session/:id` | Delete session and its children (session id resolves the location, no `directory` needed) |
+| `GET` | `/api/session/active` | Session ids running right now (`{ data: { [sessionID]: { type: "running" } } }`) |
+| `GET` | `/api/session/:id/message` | History. Query: `limit`, `order` (`asc`/`desc`), `cursor`, `type`; responds `{ data: Session.Message.Info[], cursor }` |
+| `POST` | `/api/session/:id/prompt` | Send a prompt. Body `{ text, files?, agents?, skills?, metadata?, delivery?, resume? }`; responds `{ data: Session.Inbox.User }` |
+| `POST` | `/api/session/:id/interrupt` | Stop the running turn; responds `{ interrupted: boolean }` |
+| `POST` | `/api/session/:id/agent` | Switch agent; body `{ agent: string }`; `204` |
+| `POST` | `/api/session/:id/model` | Switch model; body `{ model: { id, providerID, variant? } }`; `204` |
+| `POST` | `/api/session/:id/synthetic` | Add a synthetic message without executing (`resume: false`) |
+| `PUT` | `/api/experimental/session/:id/instructions/entries/:key` | Add/update a session instruction entry; body `{ value: JsonValue }`; `204`. Entries become part of the model's system context (`session.instructions.updated`). **MasterHand uses key `masterhand.preview`** |
+| `DELETE` | `/api/experimental/session/:id/instructions/entries/:key` | Remove an instruction entry |
 
-### Messages and commands
+### Permissions
+
+| Method | Route | Usage in MasterHand |
+|---|---|---|
+| `GET` | `/api/permission/request` | Pending requests; query `location[directory]`; responds `{ location, data: Permission.Request[] }` (used to reconcile missed events) |
+| `GET` | `/api/session/:id/permission` | Pending requests for one session (`{ data }`) |
+| `POST` | `/api/session/:id/permission/:requestID/reply` | Answer; body `{ decision: "once" \| "always" \| "reject", message? }`; `204` |
+| `GET` | `/api/permission/saved` | Persisted rules (after an `always` answer) |
+
+### Agents, models, providers and config
 
 | Method | Route | Usage |
 |---|---|---|
-| `GET` | `/session/:id/message/:messageID` | Message detail |
-| `POST` | `/session/:id/command` | Run slash command |
-| `POST` | `/session/:id/shell` | Run shell command (permission required) |
+| `GET` | `/api/agent` | Agents (`{ location, data: Agent.Info[] }`); `id`, `name`, `mode` (`primary`/`subagent`/`all`), `hidden` |
+| `GET` | `/api/model` | Model catalog (`{ location, data: Model.Info[] }`); each model has `id`, `providerID`, `name`, `variants: Model.Variant[]` and `enabled` |
+| `GET` | `/api/model/default` | Server default model (`{ location, data: Model.Info \| null }`) |
+| `GET` | `/api/provider` | Providers (`{ location, data: Provider.Info[] }`), no nested models |
+| `GET` | `/api/config` | Configuration entries (not used by MasterHand) |
 
-### Projects and working directories
+## Location (working directory) model
 
-| Method | Route | Usage |
-|---|---|---|
-| `GET` | `/project` | List known projects (`{ id, worktree, vcs?, time }`) |
-| `GET` | `/project/current` | Current project |
+opencode v2 resolves a **location** instead of the old `directory` header:
 
-opencode resolves each request against a **directory** (project root) override, so MasterHand can work on several folders with one server:
+- Location-scoped routes (`/api/agent`, `/api/model`, `/api/model/default`, `/api/provider`, `/api/permission/request`, `/api/config`, …) take `?location[directory]=/abs/path`.
+- `GET /api/session` takes the flat `?directory=/abs/path`.
+- `POST /api/session` takes `location: { directory }` in the **body**.
+- Session-scoped routes (`/api/session/:id/...`) resolve the location from the session id: no directory/header needed.
+- The `x-opencode-directory` header no longer exists.
 
-- `GET`/`HEAD` requests take `?directory=/abs/path`.
-- Mutations (`POST`/`PATCH`/`DELETE`) take the `x-opencode-directory: <url-encoded path>` header (this mirrors `@opencode-ai/sdk`'s client interceptor).
-- Sessions created with a `directory` are stored with that `directory`; `GET /session?directory=/abs/path` filters by it. The BFF forwards the header and the query parameter unchanged.
+`@opencode/client` serializes all of this; `client-core` never hand-builds the query.
 
-Verified on 1.18.32: creating a session with a `directory` registers the project; `DELETE /session/:id` deletes the session and its data.
+## Messages and prompts
 
-### Agents, configuration and providers
+- `Session.Message.Info` is a discriminated union (`user`, `assistant`, `system`, `synthetic`, `skill`, `shell`, `compaction`, `idle`, `agent-switched`, `model-switched`, `location-switched`). Only `user` and `assistant` are chat content.
+- Assistant content lives in `content: Array<{ type: "text" } | { type: "reasoning" } | { type: "tool" }>` (there is no separate `parts` array).
+  - Tool parts: `{ type: "tool", id, name, executed?, state, time }` where `state` is `streaming | running | completed | error`; completed results are `content: Tool.Content[]` (`text` or `file`).
+  - Assistant messages carry `agent`, `model: Model.Ref`, `cost`, `tokens`, `finish` and an optional structured `error`.
+- User messages carry `text` (no parts), plus optional `files`/`agents`/`skills`.
+- **The prompt body has no `model`, `agent`, `variant` or `system`**: model/agent changes go through their own endpoints (MasterHand only switches when the value actually changed, because every switch records a `*-switched` message), and `variant` travels inside `model: { id, providerID, variant? }`.
+- `SessionStatus` is `{ type: "idle" } | { type: "busy" } | { type: "retry", attempt, message, next, action? }`.
 
-| Method | Route | Usage |
-|---|---|---|
-| `GET` | `/agent` | Available agents (composer selector) |
-| `GET` | `/config` | Current configuration |
-| `GET` | `/config/providers` | Providers and default models (selector) |
-| `GET` | `/provider` | Connected providers |
+## JavaScript client
 
-### Files (post-MVP)
-
-| Method | Route | Usage |
-|---|---|---|
-| `GET` | `/find?pattern=` | Search text in files |
-| `GET` | `/find/file?query=` | Search files by name |
-| `GET` | `/file/content?path=` | Read file |
-| `GET` | `/file/status` | State of tracked files |
-
-## JavaScript SDK
-
-- Package: `@opencode-ai/sdk`; client: `createOpencodeClient({ baseUrl })`.
-- In MasterHand clients, `baseUrl` points at the BFF's same-origin proxy (e.g. `/api/oc`), so the session cookie is sent automatically (native clients use the Bearer token instead).
-- The SDK includes all generated types (`Session`, `Message`, `Part`, `Permission`, …).
+- Package: **`@opencode/client@2.0.21`** (generated Promise client; browser-compatible). The v1 `@opencode-ai/sdk` is not used.
+- `OpenCode.make({ baseUrl, headers?, fetch? })`. `baseUrl` keeps its path prefix and requests repeat `/api/...`, so pointing it at the BFF proxy works: `https://masterhand.example/api/oc/` → `/api/oc/api/session`.
+- `client-core` wraps the injected `fetch` to add the device Bearer token, keep same-origin cookies and turn failures into its own `ApiError` (unwrapping the generated client's transport error).
+- Streaming: `client.event.subscribe()` exists, but MasterHand keeps its own single-upstream EventHub (`/api/events`) for reconnection/watchdog and multi-device fan-out.
 
 ## Integration notes
 
-- `prompt_async` replies `204` and progress arrives over SSE (`message.part.updated`) — the recommended UI flow.
-- Sessions persist the `model` (`{ providerID, id, variant? }`) and `agent` they last ran with, and `GET /session` returns them (verified on 1.18.32). MasterHand uses the most recently updated session to preselect the last used model. Note: the published SDK `Session` type does not declare these fields yet, so `client-core` augments it.
-- The `prompt` body accepts `{ messageID?, model?, agent?, noReply?, system?, tools?, variant?, parts }`; for text: `parts: [{ type: "text", text: "..." }]`.
-- `variant` is a string selecting a model variant (reasoning effort levels, e.g. `low`/`medium`/`high`/`xhigh`/`max`). Available variants per model come from `GET /config/providers` (`providers[].models[].variants`); the prompt also accepts `model.variant` in `POST /session`.
-- **Do not** use `--cors` in production: clients only talk to the BFF.
-- In MasterHand it runs as the `opencode` Docker Compose service: it listens on `0.0.0.0:4096` **inside the internal network** (no published ports), with `OPENCODE_SERVER_PASSWORD` in `.env`. Binding to `127.0.0.1` only applies to native execution, not in a container.
+- `POST /api/session/:id/prompt` returns immediately with the admitted inbox item; progress arrives over SSE (`session.text.delta`, …) — the recommended UI flow.
+- Sessions persist the `agent` and `model` they last ran with; `GET /api/session` returns them, so clients can preselect the last used model.
+- Histories are paginated with an opaque cursor. `client-core` walks `cursor.next` (`order=asc`, 200 per page, 50 pages max) to load a full session.
+- In Docker it runs as the `opencode` Compose service listening on `0.0.0.0:4096` inside the internal network (no published ports), with `OPENCODE_SERVER_PASSWORD` in `.env`. Image: `npm install -g @opencode/cli@<version>` (`deploy/opencode.Dockerfile`).
+- v2 migrates v1 session data on first start (the server exposes `GET /api/experimental/migration/v1` to follow the progress). Back up the `opencode_data` volume before upgrading.

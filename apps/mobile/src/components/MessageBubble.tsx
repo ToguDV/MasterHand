@@ -6,11 +6,12 @@ import {
   subagentInfo,
   subagentOutput,
   toolTitle,
-  type MessageWithParts,
-  type ReasoningPart,
-  type SubtaskPart,
-  type TextPart,
-  type ToolPart,
+  type ChatMessage,
+  type ChatPart,
+  type ChatReasoningPart,
+  type ChatSubtaskPart,
+  type ChatTextPart,
+  type ChatToolPart,
 } from "@masterhand/client-core"
 import { colors } from "../theme"
 
@@ -45,7 +46,7 @@ function Reasoning({ text }: { text: string }) {
   )
 }
 
-function statusColor(status: ToolPart["state"]["status"]): string {
+function statusColor(status: ChatToolPart["state"]["status"]): string {
   return status === "completed"
     ? colors.success
     : status === "error"
@@ -55,7 +56,7 @@ function statusColor(status: ToolPart["state"]["status"]): string {
         : colors.muted
 }
 
-function Tool({ part }: { part: ToolPart }) {
+function Tool({ part }: { part: ChatToolPart }) {
   const [open, setOpen] = useState(false)
   const state = part.state
 
@@ -84,7 +85,7 @@ function Tool({ part }: { part: ToolPart }) {
   )
 }
 
-function Subagent({ part, onOpenSession }: { part: ToolPart; onOpenSession?: (id: string) => void }) {
+function Subagent({ part, onOpenSession }: { part: ChatToolPart; onOpenSession?: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const state = part.state
   const info = subagentInfo(part)
@@ -123,7 +124,7 @@ function Subagent({ part, onOpenSession }: { part: ToolPart; onOpenSession?: (id
   )
 }
 
-function Subtask({ part }: { part: SubtaskPart }) {
+function Subtask({ part }: { part: ChatSubtaskPart }) {
   const [open, setOpen] = useState(false)
   return (
     <View style={styles.subagentCard}>
@@ -149,22 +150,22 @@ function PartView({
   part,
   onOpenSession,
 }: {
-  part: MessageWithParts["parts"][number]
+  part: ChatPart
   onOpenSession?: (id: string) => void
 }) {
   switch (part.type) {
     case "text":
-      return <SegmentText text={(part as TextPart).text} />
+      return <SegmentText text={part.text} />
     case "reasoning":
-      return <Reasoning text={(part as ReasoningPart).text} />
+      return <Reasoning text={part.text} />
     case "tool":
       return isTaskTool(part) ? (
         <Subagent part={part} onOpenSession={onOpenSession} />
       ) : (
-        <Tool part={part as ToolPart} />
+        <Tool part={part} />
       )
     case "subtask":
-      return <Subtask part={part as SubtaskPart} />
+      return <Subtask part={part} />
     default:
       return null
   }
@@ -174,14 +175,14 @@ export function MessageBubble({
   entry,
   onOpenSession,
 }: {
-  entry: MessageWithParts
+  entry: ChatMessage
   onOpenSession?: (id: string) => void
 }) {
   const info = entry.info
 
   if (info.role === "user") {
     const text = entry.parts
-      .filter((part): part is TextPart => part.type === "text")
+      .filter((part): part is ChatTextPart => part.type === "text")
       .map((part) => part.text)
       .join("\n")
     if (!text.trim()) return null
@@ -194,11 +195,9 @@ export function MessageBubble({
     )
   }
 
-  const visible = entry.parts.filter((part) => part.type !== "step-start" && part.type !== "step-finish")
+  const visible = entry.parts
   const streaming = info.time.completed === undefined
-  const errorMessage = info.error
-    ? String((info.error as { data?: { message?: string } }).data?.message ?? "Agent error")
-    : null
+  const errorMessage = info.error ? info.error.message || "Agent error" : null
 
   return (
     <View style={styles.assistantBlock}>
@@ -210,8 +209,8 @@ export function MessageBubble({
       {info.time.completed !== undefined ? (
         <Text style={styles.caption}>
           {info.modelID}
-          {info.cost > 0 ? ` · $${info.cost.toFixed(4)}` : ""}
-          {info.tokens.output > 0 ? ` · ${info.tokens.output} tok` : ""}
+          {(info.cost ?? 0) > 0 ? ` · $${(info.cost ?? 0).toFixed(4)}` : ""}
+          {(info.tokens?.output ?? 0) > 0 ? ` · ${info.tokens?.output} tok` : ""}
         </Text>
       ) : null}
     </View>

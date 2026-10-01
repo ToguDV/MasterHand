@@ -8,8 +8,7 @@ import {
   selectableAgents,
   sessionModelValue,
   useAgents,
-  useConfig,
-  useProviders,
+  useModels,
   useSessions,
   variantLabel,
 } from "@masterhand/client-core"
@@ -54,31 +53,33 @@ function writePreferences(sessionID: string, preferences: SessionPreferences): v
 export function Composer({
   sessionID,
   busy,
-  directory,
+  workspaceID,
   autoAccept,
   onToggleAutoAccept,
 }: {
   sessionID: string
   busy: boolean
-  directory?: string | null
+  workspaceID: string | null
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
 }) {
   const agentsQuery = useAgents(client)
-  const providersQuery = useProviders(client)
-  const configQuery = useConfig(client)
-  const sessionsQuery = useSessions(client, true, 10_000, directory)
+  const modelsQuery = useModels(client)
+  const sessionsQuery = useSessions(client, true, 10_000, workspaceID)
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
 
-  const modelOptions = useMemo(() => flattenModels(providersQuery.data?.providers ?? []), [providersQuery.data])
-
+  const catalog = modelsQuery.data
+  const modelOptions = useMemo(
+    () => flattenModels(catalog?.models ?? [], catalog?.providers ?? []),
+    [catalog],
+  )
+  const session = sessionsQuery.data?.find((item) => item.id === sessionID)
   const defaultModel = useMemo(() => {
     const sessions = sessionsQuery.data ?? []
-    const session = sessions.find((item) => item.id === sessionID)
     const preferred = sessionModelValue(session, modelOptions) ?? recentModelValue(sessions, modelOptions)
-    return defaultModelValue(configQuery.data?.model, providersQuery.data?.default ?? {}, modelOptions, preferred)
-  }, [configQuery.data, providersQuery.data, modelOptions, sessionsQuery.data, sessionID])
+    return defaultModelValue(catalog?.defaultModel ?? null, modelOptions, preferred)
+  }, [catalog, modelOptions, sessionsQuery.data, session])
 
   // Per-session selections: restored on mount (the view is keyed by session)
   // and written back so switching sessions or reloading keeps them.
@@ -99,7 +100,7 @@ export function Composer({
   useEffect(() => {
     const fallback = agents[0]
     if (!fallback) return
-    if (!agent || !agents.some((item) => item.name === agent)) setAgent(fallback.name)
+    if (!agent || !agents.some((item) => item.id === agent)) setAgent(fallback.id)
   }, [agent, agents])
 
   useEffect(() => {
@@ -130,16 +131,15 @@ export function Composer({
     setSending(true)
     setError(null)
     try {
-      const modelValue = model ? parseModel(model) : undefined
-      await client.api.promptAsync(
+      const modelValue = model ? parseModel(model, variant || undefined) : undefined
+      await client.api.prompt(
         sessionID,
         {
-          parts: [{ type: "text", text: trimmed }],
+          text: trimmed,
           ...(agent ? { agent } : {}),
-          ...(variant ? { variant } : {}),
           ...(modelValue ? { model: modelValue } : {}),
         },
-        directory,
+        { agent: session?.agent, model: session?.model },
       )
       setText("")
     } catch (err) {
@@ -151,7 +151,7 @@ export function Composer({
 
   async function stop() {
     try {
-      await client.api.abortSession(sessionID, directory)
+      await client.api.abortSession(sessionID)
     } catch {
       // the state reconciles through events
     }
@@ -163,7 +163,7 @@ export function Composer({
         <div className="flex flex-wrap gap-2">
           <SearchSelect
             value={agent}
-            options={agents.map((item) => ({ value: item.name, label: item.name }))}
+            options={agents.map((item) => ({ value: item.id, label: item.name }))}
             onChange={setAgent}
             ariaLabel="Agent"
             placeholder="agent…"

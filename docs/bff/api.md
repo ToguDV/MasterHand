@@ -33,8 +33,8 @@ Other rules:
 
 | Method | Route | Response | Notes |
 |---|---|---|---|
-| `GET` | `/api/status` | `{ ok: true, opencode: { healthy, version? }, preview: { enabled, available, portRange } }` | Calls opencode's `/global/health` with a 3s timeout; on failure returns `healthy: false`. `preview.available` reports whether the `cloudflared` binary can be executed |
-| `GET` | `/api/events` | SSE | Re-emits opencode events from **all projects** (hub on `/global/event`); first event `hello` with `{ connected }`; `ping` every 25s |
+| `GET` | `/api/status` | `{ ok: true, opencode: { healthy, version? }, preview: { enabled, available, portRange } }` | Calls opencode's `/api/info` with a 3s timeout; on failure returns `healthy: false`. `preview.available` reports whether the `cloudflared` binary can be executed |
+| `GET` | `/api/events` | SSE | Re-emits opencode v2 events from **all locations** (hub on `/api/event`); first event `hello` with `{ connected }`; `ping` every 25s |
 | `GET` | `/api/devices` | `{ devices: DeviceRecord[] }` | Lists registered devices |
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
 | `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Workspaces, oldest first |
@@ -43,7 +43,7 @@ Other rules:
 | `GET` | `/api/workspaces/:id/directories` | `{ directories: string[] }` | Workspace folder plus every isolated worktree of the workspace (used to reconcile pending permissions per directory) |
 | `GET` | `/api/workspaces/:id/sessions` | `{ sessions: Session[] }` | Aggregates opencode sessions from the workspace folder and every worktree. Isolated sessions (and subagent children) carry `isolation: { isolated: true, worktreePath, branch, baseRef, pushed, prUrl }`. `502` when opencode is unreachable |
 | `POST` | `/api/workspaces/:id/sessions` | `201 { session, isolation }` | Body: `{ "isolated": true }` optional. Standard sessions are created in the workspace folder (`isolation: null`). Isolated sessions `git init` the workspace when needed, create a worktree under `WORKTREES_ROOT`, create the opencode session there and return the `isolation` metadata. On failure the worktree is rolled back (`500 isolation_failed`) |
-| `DELETE` | `/api/workspaces/:id/sessions/:sessionID` | `{ ok: true }` | Deletes the opencode session. For isolated sessions it also removes the worktree and the branch. Optional `?directory=` targets the session's directory (worktree for subagent children); `403` when it is not one of the workspace directories. `404` unknown workspace |
+| `DELETE` | `/api/workspaces/:id/sessions/:sessionID` | `{ ok: true }` | Deletes the opencode session (the session id resolves its location; no `directory` needed). For isolated sessions it also removes the worktree and the branch. `404` unknown workspace |
 | `POST` | `/api/isolated-sessions/:sessionID/finish` | `{ committed, pushed, prUrl, branch, path, error }` | Commits everything in the worktree. With a remote it pushes the branch and tries `gh`/`glab` for the PR, falling back to a provider compare URL; `error` reports a failed push. `404` for unknown/non-isolated sessions |
 | `GET` | `/api/sessions/:sessionID/preview` | `{ preview: PreviewStatus }` | Current preview state for the session. `404 preview_disabled` when `PREVIEW_ENABLED=false` |
 | `POST` | `/api/sessions/:sessionID/preview` | `{ preview: PreviewStatus }` | Starts a Cloudflare quick tunnel to the session's reserved port. `409 preview_not_running` when nothing listens on the port, `503 preview_unavailable` when `cloudflared` is missing, `503 preview_ports_exhausted` when the pool is drained, `502` on tunnel failure. Idempotent while running |
@@ -55,7 +55,7 @@ Other rules:
 
 ## Session previews
 
-Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on first use (persisted in SQLite so it survives BFF restarts and the same dev server can be re-exposed). While previews are enabled, the proxy appends a `system` instruction to every prompt of that session telling the agent to bind any web server to `0.0.0.0:<port>`. The BFF then starts `cloudflared tunnel --no-autoupdate --url http://<PREVIEW_ORIGIN>:<port> --http-host-header localhost:<port>` (a Cloudflare **quick tunnel**, see `deploy/server.Dockerfile`) and captures the random `https://<name>.trycloudflare.com` URL from its output. The `--http-host-header` rewrite is required: framework dev servers reject the public hostname (Vite's `server.allowedHosts` returns `403 Blocked request`), and `localhost` is always allowed. Once the URL is captured, the BFF polls it for up to `PREVIEW_READINESS_MS` until it answers (the edge can take a few seconds to serve a new hostname), so `running` means the preview really loads.
+Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on session creation (persisted in SQLite so it survives BFF restarts and the same dev server can be re-exposed). While previews are enabled, the BFF writes a session instruction entry (`PUT /api/experimental/session/:id/instructions/entries/masterhand.preview`) telling the agent to bind any web server to `0.0.0.0:<port>`; opencode includes it in the model's system context on every turn. The BFF then starts `cloudflared tunnel --no-autoupdate --url http://<PREVIEW_ORIGIN>:<port> --http-host-header localhost:<port>` (a Cloudflare **quick tunnel**, see `deploy/server.Dockerfile`) and captures the random `https://<name>.trycloudflare.com` URL from its output. The `--http-host-header` rewrite is required: framework dev servers reject the public hostname (Vite's `server.allowedHosts` returns `403 Blocked request`), and `localhost` is always allowed. Once the URL is captured, the BFF polls it for up to `PREVIEW_READINESS_MS` until it answers (the edge can take a few seconds to serve a new hostname), so `running` means the preview really loads.
 
 `PreviewStatus` shape: `{ status: "stopped" | "starting" | "running" | "error", url, port, error }`. The tunnel process lives in the BFF container; `PREVIEW_ORIGIN` is the host where the dev server listens as seen from there (`opencode` in Compose, `127.0.0.1` in native dev). Tunnels stop on `DELETE`, on session deletion and on BFF shutdown.
 
@@ -65,22 +65,27 @@ Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on first use (persi
 
 | Method | Route | Notes |
 |---|---|---|
-| `*` | `/api/oc/*` | Forwards to `OPENCODE_URL` (e.g. `http://opencode:4096`) injecting `Authorization: Basic` with `OPENCODE_SERVER_PASSWORD`. The `/api/oc` prefix is removed: `/api/oc/global/health` → `GET /global/health`. Preserves method, body, query and `content-type`. Forwards the `x-opencode-directory` header (used to target a workspace on mutations) and preserves the `directory` query parameter (used on GET). SSE streaming without buffering (`cache-control: no-cache`, `x-accel-buffering: no`). `502` if opencode does not answer. On `POST /api/oc/session/:id/prompt_async` and `/message` it appends the session's preview instruction to the JSON `system` field (see *Session previews*); every other request is byte-for-byte passthrough. |
+| `*` | `/api/oc/*` | Forwards to `OPENCODE_URL` (e.g. `http://opencode:4096`) injecting `Authorization: Basic` with `OPENCODE_SERVER_PASSWORD`. The `/api/oc` prefix is removed: `/api/oc/api/info` → `GET /api/info`. Preserves method, body, query and `content-type` byte-for-byte (including the `location[directory]` query used to target a workspace). SSE streaming without buffering (`cache-control: no-cache`, `x-accel-buffering: no`). `502` if opencode does not answer. |
 
 Examples:
 
 ```bash
-# create session
-curl -X POST https://your-origin.example/api/oc/session -H 'content-type: application/json' -d '{}'
-# send prompt (async; progress arrives over /api/events)
-curl -X POST https://your-origin.example/api/oc/session/<id>/prompt_async \
+# create a session in a workspace (location travels in the body)
+curl -X POST https://your-origin.example/api/oc/api/session \
   -H 'content-type: application/json' \
-  -d '{"parts":[{"type":"text","text":"hello"}],"agent":"build","model":{"providerID":"opencode-go","modelID":"grok-4.7"},"variant":"high"}'
+  -d '{"location":{"directory":"/workspace/my-app"}}'
+# switch model and send a prompt (progress arrives over /api/events)
+curl -X POST https://your-origin.example/api/oc/api/session/<id>/model \
+  -H 'content-type: application/json' \
+  -d '{"model":{"id":"grok-4.7","providerID":"opencode-go","variant":"high"}}'
+curl -X POST https://your-origin.example/api/oc/api/session/<id>/prompt \
+  -H 'content-type: application/json' \
+  -d '{"text":"hello"}'
 # answer permission
-curl -X POST https://your-origin.example/api/oc/session/<id>/permissions/<permissionID> \
-  -H 'content-type: application/json' -d '{"response":"once"}'
+curl -X POST https://your-origin.example/api/oc/api/session/<id>/permission/<requestID>/reply \
+  -H 'content-type: application/json' -d '{"decision":"once"}'
 # list pending permissions for a workspace (to reconcile missed SSE events)
-curl 'https://your-origin.example/api/oc/permission?directory=/workspace/my-app'
+curl 'https://your-origin.example/api/oc/api/permission/request?location%5Bdirectory%5D=/workspace/my-app'
 # native login (device token)
 curl -X POST https://your-origin.example/api/devices \
   -H 'content-type: application/json' -d '{"password":"...","name":"Pixel 9"}'

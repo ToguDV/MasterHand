@@ -207,7 +207,7 @@ function SessionRow({
           ) : null}
         </View>
         <Text style={styles.rowMeta}>
-          {directoryName(session.directory)} · {formatRelative(session.time.updated)}
+          {directoryName(session.location.directory)} · {formatRelative(session.time.updated)}
         </Text>
       </Pressable>
       <Pressable style={styles.delete} onPress={() => onDelete(session)} accessibilityLabel="Delete session">
