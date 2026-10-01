@@ -20,7 +20,8 @@ Verified on **2026-10-01** against a live **opencode v2.0.6** server and the gen
 
 | Event | `data` (verified) | Usage |
 |---|---|---|
-| `server.connected` | `{}` | Connection indicator |
+| `server.connected` | `{}` | Connection indicator; **reconnection recovery**: opencode (re)connected, so clients refetch (missed events, failed catalogs/messages) |
+| `agent.updated` / `model.updated` / `provider.updated` / `models-dev.refreshed` | `{}` | Catalog hot-reload (config edits, models.dev refresh): refresh the composer agent/model lists |
 | `session.created` | `{ sessionID, projectID, location, parentID?, title?, agent?, model? }` | Add session to the list |
 | `session.renamed` | `{ sessionID, title }` | Update title in the list |
 | `session.metadata.updated` | `{ sessionID, metadata }` | Refresh session metadata |

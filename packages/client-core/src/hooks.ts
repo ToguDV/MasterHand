@@ -136,6 +136,18 @@ export function createEventHandler(
   queryClient: QueryClient,
   callbacks: EventHandlerCallbacks = {},
 ): (event: unknown) => void {
+  // opencode emits one catalog event per location when it hot-reloads its
+  // config; coalesce the burst into a single refetch.
+  let catalogRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  const refreshCatalogs = () => {
+    if (catalogRefreshTimer !== null) return
+    catalogRefreshTimer = setTimeout(() => {
+      catalogRefreshTimer = null
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.models })
+    }, 250)
+  }
+
   return (raw) => {
     if (!raw || typeof raw !== "object") return
     const event = raw as V2Event
@@ -153,6 +165,20 @@ export function createEventHandler(
     }
 
     switch (event.type) {
+      case "server.connected":
+        // opencode (re)connected upstream. The BFF hub keeps the downstream
+        // stream open while it retries, so a page loaded during the outage
+        // (e.g. a dev-server restart) keeps failed agent/model catalogs and
+        // messages until it is reloaded. This event is the recovery signal.
+        invalidateOnReconnect(queryClient)
+        return
+      case "agent.updated":
+      case "model.updated":
+      case "provider.updated":
+      case "models-dev.refreshed":
+        // opencode hot-reloaded its catalog (config edits, models.dev refresh).
+        refreshCatalogs()
+        return
       case "permission.asked":
         callbacks.onPermission?.(event.data as Permission)
         return
