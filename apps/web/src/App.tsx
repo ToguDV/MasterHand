@@ -4,6 +4,7 @@ import {
   ApiError,
   createEventHandler,
   invalidateOnReconnect,
+  reconcilePermissions,
   useBffStatus,
   useEventStream,
   useSessionDirectories,
@@ -110,6 +111,7 @@ export default function App() {
         onPermissionReplied: (permissionID) =>
           setPermissions((prev) => prev.filter((item) => item.id !== permissionID)),
         onSessionError: (message) => setBanner(message),
+        onServerConnected: () => void syncPermissionsRef.current(),
       }),
     [queryClient],
   )
@@ -148,27 +150,42 @@ export default function App() {
   const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
   const workspacePath = workspace?.path ?? null
   const directoriesQuery = useSessionDirectories(client, authed === true, workspaceID)
+  const sessionsQuery = useSessions(client, authed === true, 10_000, workspaceID)
 
   // `permission.asked` events are lost while disconnected and never replayed.
   // On connect (and once workspaces load) reconcile against opencode, which
   // exposes pending requests per directory (workspace folder + worktrees).
   const syncPermissions = useCallback(async () => {
     const directories = directoriesQuery.data ?? (workspacePath ? [workspacePath] : [])
-    try {
-      const lists = await Promise.all(
-        directories.map((dir) => client.api.permissions(dir).catch(() => [] as Permission[])),
-      )
-      const pending = lists.flat()
-      if (pending.length === 0) return
-      setPermissions((prev) => {
-        const byId = new Map(prev.map((item) => [item.id, item]))
-        for (const item of pending) byId.set(item.id, item)
-        return [...byId.values()]
-      })
-    } catch {
-      // best effort: a missed stream event is not worth surfacing an error
-    }
-  }, [directoriesQuery.data, workspacePath])
+    if (directories.length === 0) return
+
+    // A directory that fails to answer must not look like "no pending
+    // requests": it stays out of the covered set, so its live permissions are
+    // kept instead of pruned.
+    const results = await Promise.all(
+      directories.map(async (directory): Promise<{ directory: string; pending: Permission[] | null }> => {
+        try {
+          return { directory, pending: await client.api.permissions(directory) }
+        } catch {
+          return { directory, pending: null }
+        }
+      }),
+    )
+    const answered = results.filter(
+      (result): result is { directory: string; pending: Permission[] } => result.pending !== null,
+    )
+    if (answered.length === 0) return
+
+    const snapshot = answered.flatMap((result) => result.pending)
+    const covered = new Set(
+      (sessionsQuery.data ?? [])
+        .filter((session) => answered.some((result) => result.directory === session.location.directory))
+        .map((session) => session.id),
+    )
+    setPermissions((prev) => reconcilePermissions(prev, snapshot, covered))
+  }, [client, directoriesQuery.data, workspacePath, sessionsQuery.data])
+  const syncPermissionsRef = useRef(syncPermissions)
+  syncPermissionsRef.current = syncPermissions
 
   const handleConnect = useCallback(() => {
     invalidateOnReconnect(queryClient)
@@ -226,7 +243,6 @@ export default function App() {
     }
   }, [authed, queryClient])
 
-  const sessionsQuery = useSessions(client, authed === true, 10_000, workspaceID)
   const statusesQuery = useSessionStatuses(client, authed === true, connected)
 
   useEffect(() => {
