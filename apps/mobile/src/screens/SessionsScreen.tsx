@@ -4,6 +4,7 @@ import {
   directoryName,
   filterSessions,
   formatRelative,
+  rootSessions,
   type CreateWorkspaceInput,
   type Session,
   type SessionFilter,
@@ -53,7 +54,8 @@ export function SessionsScreen({
   const [filter, setFilter] = useState<SessionFilter>("all")
   const [isolated, setIsolated] = useState(false)
   const workspace = workspaces.find((item) => item.id === workspaceID) ?? null
-  const visible = filterSessions(sessions, filter)
+  // Subagent children are reachable from their parent's card, not the list.
+  const visible = filterSessions(rootSessions(sessions), filter)
 
   const FILTERS: Array<{ value: SessionFilter; label: string }> = [
     { value: "all", label: "All" },

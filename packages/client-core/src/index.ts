@@ -59,4 +59,4 @@ export {
   type EventHandlerCallbacks,
   type UseEventStreamOptions,
 } from "./hooks"
-export { filterSessions, sessionDirectory, type SessionFilter } from "./sessions"
+export { filterSessions, rootSessions, sessionDirectory, type SessionFilter } from "./sessions"
