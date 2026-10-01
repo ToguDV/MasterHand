@@ -2,40 +2,81 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 
 const port = Number(process.env.MOCK_PORT ?? 4097)
 
-interface Part {
-  id: string
-  sessionID: string
-  messageID: string
-  type: string
-  text?: string
-  tool?: string
-  callID?: string
-  state?: Record<string, unknown>
+interface TokenUsage {
+  input: number
+  output: number
+  reasoning: number
+  cache: { read: number; write: number }
 }
 
-interface MessageInfo {
+interface ModelRef {
   id: string
-  sessionID: string
-  role: "user" | "assistant"
-  time: { created: number; completed?: number }
-  [key: string]: unknown
+  providerID: string
+  variant?: string
 }
 
-interface ConversationEntry {
-  info: MessageInfo
-  parts: Part[]
+interface SessionRecord {
+  id: string
+  parentID?: string
+  projectID: string
+  agent?: string
+  model?: ModelRef
+  cost: number
+  tokens: TokenUsage
+  time: { created: number; updated: number }
+  title: string
+  location: { directory: string }
 }
+
+interface UserMessage {
+  id: string
+  sessionID: string
+  time: { created: number }
+  text: string
+  type: "user"
+}
+
+interface AssistantText {
+  type: "text"
+  text: string
+}
+
+interface AssistantTool {
+  type: "tool"
+  id: string
+  name: string
+  executed?: boolean
+  state: Record<string, unknown>
+  time: { created: number; ran?: number; completed?: number }
+}
+
+interface AssistantMessage {
+  id: string
+  sessionID: string
+  time: { created: number; streamed?: number; completed?: number }
+  type: "assistant"
+  agent: string
+  model: ModelRef
+  content: Array<AssistantText | AssistantTool>
+  finish?: string
+  cost?: number
+  tokens?: TokenUsage
+}
+
+type SessionMessage = UserMessage | AssistantMessage
 
 interface PendingPermission {
   request: Record<string, unknown>
   sessionID: string
-  resolve: (response: unknown) => void
+  directory: string
+  resolve: (decision: string) => void
 }
 
 const sseClients = new Set<ServerResponse>()
-const sessions = new Map<string, Record<string, unknown>>()
-const conversations = new Map<string, ConversationEntry[]>()
+const sessions = new Map<string, SessionRecord>()
+const conversations = new Map<string, SessionMessage[]>()
 const pendingPermissions = new Map<string, PendingPermission>()
+const activeRuns = new Set<string>()
 
 // Seed from the clock so ids never repeat across runs: the BFF reuses a
 // persistent SQLite DATA_DIR locally, so restarting at `ses_1` every time
@@ -45,15 +86,19 @@ const nextId = (prefix: string): string => `${prefix}_${(++sequence).toString(36
 const now = (): number => Date.now()
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+function emptyTokens(): TokenUsage {
+  return { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+}
+
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(payload) })
   res.end(payload)
 }
 
-function broadcast(event: unknown): void {
-  const frame = `data: ${JSON.stringify({ directory: "/e2e", project: "global", payload: event })}\n\n`
-  for (const client of sseClients) client.write(frame)
+function empty(res: ServerResponse, status = 204): void {
+  res.writeHead(status)
+  res.end()
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -70,254 +115,306 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   })
 }
 
+/** Emits an opencode v2 event (`{ id, type, data, location? }`) to every SSE client. */
+function broadcast(type: string, data: unknown, directory?: string): void {
+  const event = {
+    id: nextId("evt"),
+    created: now(),
+    type,
+    ...(directory ? { location: { directory } } : {}),
+    data,
+  }
+  const frame = `data: ${JSON.stringify(event)}\n\n`
+  for (const client of sseClients) client.write(frame)
+}
+
 function openStream(res: ServerResponse): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
-  res.write(
-    `data: ${JSON.stringify({ directory: "/e2e", payload: { type: "server.connected", properties: {} } })}\n\n`,
-  )
+  broadcast("server.connected", {})
   sseClients.add(res)
-  res.on("close", () => sseClients.delete(res))
+  const keepalive = setInterval(() => res.write(": ping\n\n"), 25_000)
+  res.on("close", () => {
+    clearInterval(keepalive)
+    sseClients.delete(res)
+  })
 }
 
-function requestDirectory(req: IncomingMessage, url: URL): string {
-  const query = url.searchParams.get("directory")
-  if (query) return query
-  const header = req.headers["x-opencode-directory"]
-  if (typeof header === "string") return decodeURIComponent(header)
-  return "/e2e/project"
-}
-
-function createSession(directory = "/e2e/project"): Record<string, unknown> {
-  const session = {
+function createSession(input: { directory: string; parentID?: string; title?: string }): SessionRecord {
+  const session: SessionRecord = {
     id: nextId("ses"),
-    slug: "e2e-session",
     projectID: "global",
-    directory,
-    title: "",
-    version: "1.0.0",
+    cost: 0,
+    tokens: emptyTokens(),
     time: { created: now(), updated: now() },
+    title: input.title ?? "",
+    location: { directory: input.directory },
   }
+  if (input.parentID) session.parentID = input.parentID
   sessions.set(session.id, session)
   conversations.set(session.id, [])
-  broadcast({ type: "session.created", properties: { info: session } })
+  broadcast(
+    "session.created",
+    {
+      sessionID: session.id,
+      projectID: session.projectID,
+      location: { directory: input.directory },
+      ...(input.parentID ? { parentID: input.parentID } : {}),
+      slug: "e2e-session",
+      title: session.title,
+      version: "2.0.6",
+    },
+    input.directory,
+  )
   return session
 }
 
-function appendPart(sessionID: string, entry: ConversationEntry, part: Part): void {
-  const existing = entry.parts.find((item) => item.id === part.id)
-  if (existing) Object.assign(existing, part)
-  else entry.parts.push(part)
-  broadcast({ type: "message.part.updated", properties: { part: { ...part } } })
+function appendUserMessage(sessionID: string, text: string): UserMessage {
+  const message: UserMessage = {
+    id: nextId("msg"),
+    sessionID,
+    time: { created: now() },
+    text,
+    type: "user",
+  }
+  conversations.get(sessionID)?.push(message)
+  const session = sessions.get(sessionID)
+  if (session) session.time.updated = now()
+  return message
+}
+
+function appendAssistantMessage(sessionID: string): AssistantMessage {
+  const session = sessions.get(sessionID)
+  const message: AssistantMessage = {
+    id: nextId("msg"),
+    sessionID,
+    time: { created: now() },
+    type: "assistant",
+    agent: session?.agent ?? "build",
+    model: session?.model ?? { id: "test-model", providerID: "test" },
+    content: [],
+  }
+  conversations.get(sessionID)?.push(message)
+  return message
+}
+
+function directoryOf(sessionID: string): string | undefined {
+  return sessions.get(sessionID)?.location.directory
+}
+
+/** Streams one text part (`started` + deltas + `ended`) for an assistant message. */
+function streamText(sessionID: string, messageID: string, ordinal: number, final: string): void {
+  const directory = directoryOf(sessionID)
+  broadcast("session.text.started", { sessionID, assistantMessageID: messageID, ordinal }, directory)
+  broadcast("session.text.delta", { sessionID, assistantMessageID: messageID, ordinal, delta: final }, directory)
+  broadcast("session.text.ended", { sessionID, assistantMessageID: messageID, ordinal, text: final }, directory)
+}
+
+function completeAssistant(
+  session: SessionRecord,
+  assistant: AssistantMessage,
+  usage: { cost: number; tokens: TokenUsage; finish?: string },
+): void {
+  const completed = now()
+  assistant.time = { created: assistant.time.created, streamed: completed, completed }
+  assistant.finish = usage.finish ?? "stop"
+  assistant.cost = usage.cost
+  assistant.tokens = usage.tokens
+  session.cost += usage.cost
+  session.time.updated = completed
+  broadcast(
+    "session.step.ended",
+    {
+      sessionID: session.id,
+      assistantMessageID: assistant.id,
+      finish: assistant.finish,
+      cost: usage.cost,
+      tokens: usage.tokens,
+    },
+    session.location.directory,
+  )
+  broadcast("session.execution.succeeded", { sessionID: session.id }, session.location.directory)
 }
 
 async function runSubagentPrompt(sessionID: string, text: string): Promise<void> {
+  const session = sessions.get(sessionID)
   const conversation = conversations.get(sessionID)
-  if (!conversation) return
+  if (!session || !conversation) return
 
-  broadcast({ type: "session.status", properties: { sessionID, status: { type: "busy" } } })
+  activeRuns.add(sessionID)
+  broadcast("session.execution.started", { sessionID }, session.location.directory)
+  await delay(30)
 
-  const user: ConversationEntry = {
-    info: {
-      id: nextId("msg"),
-      sessionID,
-      role: "user",
-      time: { created: now() },
-      agent: "build",
-      model: { providerID: "test", modelID: "test-model" },
-    },
-    parts: [],
-  }
-  conversation.push(user)
-  broadcast({ type: "message.updated", properties: { info: user.info } })
-  appendPart(sessionID, user, { id: nextId("prt"), sessionID, messageID: user.info.id, type: "text", text })
-
-  await delay(40)
-
-  const child = createSession(sessions.get(sessionID)?.directory as string | undefined)
-  const childID = child.id as string
-  child.parentID = sessionID
-  child.title = "Explore the repository (@explore subagent)"
-  broadcast({ type: "session.updated", properties: { info: child } })
-
-  const childConversation = conversations.get(childID)
-  if (childConversation) {
-    const childAssistant: ConversationEntry = {
-      info: {
-        id: nextId("msg"),
-        sessionID: childID,
-        role: "assistant",
-        time: { created: now(), completed: now() },
-        modelID: "test-model",
-        providerID: "test",
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      },
-      parts: [],
-    }
-    childConversation.push(childAssistant)
-    broadcast({ type: "message.updated", properties: { info: childAssistant.info } })
-    appendPart(childID, childAssistant, {
-      id: nextId("prt"),
-      sessionID: childID,
-      messageID: childAssistant.info.id,
-      type: "text",
-      text: "Found 3 files",
-    })
-  }
-
-  const assistant: ConversationEntry = {
-    info: {
-      id: nextId("msg"),
-      sessionID,
-      role: "assistant",
-      time: { created: now() },
-      modelID: "test-model",
-      providerID: "test",
-      cost: 0.001,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    },
-    parts: [],
-  }
-  conversation.push(assistant)
-  broadcast({ type: "message.updated", properties: { info: assistant.info } })
-
+  const assistant = appendAssistantMessage(sessionID)
+  const toolID = nextId("prt")
+  const started = now()
   const input = {
-    subagent_type: "explore",
+    agent: "explore",
     description: "Explore the repository",
     prompt: "List the files in the project",
   }
-  const task: Part = {
-    id: nextId("prt"),
-    sessionID,
-    messageID: assistant.info.id,
+  broadcast(
+    "session.tool.input.started",
+    { sessionID, assistantMessageID: assistant.id, id: toolID, name: "subagent" },
+    session.location.directory,
+  )
+  const tool: AssistantTool = {
     type: "tool",
-    callID: nextId("call"),
-    tool: "task",
-    state: {
-      status: "running",
-      input,
-      title: input.description,
-      metadata: { sessionId: childID },
-      time: { start: now() },
-    },
+    id: toolID,
+    name: "subagent",
+    executed: true,
+    state: { status: "running", input, metadata: { title: input.description }, time: { created: started } },
+    time: { created: started },
   }
-  appendPart(sessionID, assistant, task)
+  assistant.content = [tool]
+  broadcast(
+    "session.tool.called",
+    { sessionID, assistantMessageID: assistant.id, id: toolID, input, executed: true },
+    session.location.directory,
+  )
 
-  await delay(120)
+  await delay(80)
 
-  task.state = {
+  // The subagent runs in its own session, linked through `parentID`.
+  const child = createSession({
+    directory: session.location.directory,
+    parentID: sessionID,
+    title: "Explore the repository (@explore subagent)",
+  })
+  appendUserMessage(child.id, input.prompt)
+  const childAssistant = appendAssistantMessage(child.id)
+  childAssistant.agent = "explore"
+  childAssistant.content = [{ type: "text", text: "Found 3 files" }]
+  const childCompleted = now()
+  childAssistant.time = { created: childAssistant.time.created, streamed: childCompleted, completed: childCompleted }
+  childAssistant.finish = "stop"
+  childAssistant.cost = 0
+  childAssistant.tokens = emptyTokens()
+
+  await delay(60)
+
+  const output = `<subagent id="${child.id}" state="completed">\n<summary>Explore completed</summary>\n<task_result>Found 3 files</task_result>\n</subagent>`
+  const metadata = { sessionID: child.id, status: "completed" }
+  tool.state = {
     status: "completed",
     input,
-    output: `<task id="${childID}" state="completed">\n<summary>Explore completed</summary>\n<task_result>Found 3 files</task_result>\n</task>`,
-    title: input.description,
-    metadata: { sessionId: childID },
-    time: { start: now() - 100, end: now() },
+    content: [{ type: "text", text: output }],
+    metadata,
+    time: { start: started, end: now() },
   }
-  appendPart(sessionID, assistant, task)
+  broadcast(
+    "session.tool.success",
+    {
+      sessionID,
+      assistantMessageID: assistant.id,
+      id: toolID,
+      content: [{ type: "text", text: output }],
+      metadata,
+      executed: true,
+    },
+    session.location.directory,
+  )
 
-  assistant.info.time.completed = now()
-  assistant.info.tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
-  broadcast({ type: "message.updated", properties: { info: assistant.info } })
-  broadcast({ type: "session.status", properties: { sessionID, status: { type: "idle" } } })
-  broadcast({ type: "session.idle", properties: { sessionID } })
+  completeAssistant(session, assistant, {
+    cost: 0.001,
+    tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+  activeRuns.delete(sessionID)
 }
 
-async function runPrompt(sessionID: string, text: string, body: Record<string, unknown> = {}): Promise<void> {
+async function runPrompt(sessionID: string, text: string): Promise<void> {
+  const session = sessions.get(sessionID)
   const conversation = conversations.get(sessionID)
-  if (!conversation) return
+  if (!session || !conversation) return
 
   if (text.toLowerCase().includes("subagent")) return runSubagentPrompt(sessionID, text)
 
-  const session = sessions.get(sessionID)
-  const model = body.model as { providerID?: string; modelID?: string } | undefined
-  if (session && model?.providerID && model.modelID) {
-    session.model = {
-      providerID: model.providerID,
-      id: model.modelID,
-      ...(typeof body.variant === "string" ? { variant: body.variant } : {}),
-    }
-  }
+  activeRuns.add(sessionID)
+  broadcast("session.execution.started", { sessionID }, session.location.directory)
+  await delay(30)
 
-  broadcast({ type: "session.status", properties: { sessionID, status: { type: "busy" } } })
+  const assistant = appendAssistantMessage(sessionID)
+  assistant.content = [{ type: "text", text: "Working…" }]
+  streamText(sessionID, assistant.id, 0, "Working…")
 
-  const user: ConversationEntry = {
-    info: {
-      id: nextId("msg"),
-      sessionID,
-      role: "user",
-      time: { created: now() },
-      agent: "build",
-      model: { providerID: "test", modelID: "test-model" },
-    },
-    parts: [],
-  }
-  conversation.push(user)
-  broadcast({ type: "message.updated", properties: { info: user.info } })
-  appendPart(sessionID, user, {
-    id: nextId("prt"),
-    sessionID,
-    messageID: user.info.id,
-    type: "text",
-    text,
-  })
+  await delay(30)
 
-  await delay(40)
-
-  const assistant: ConversationEntry = {
-    info: {
-      id: nextId("msg"),
-      sessionID,
-      role: "assistant",
-      time: { created: now() },
-      modelID: "test-model",
-      providerID: "test",
-      cost: 0.001,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    },
-    parts: [],
-  }
-  conversation.push(assistant)
-  broadcast({ type: "message.updated", properties: { info: assistant.info } })
-  const answer: Part = {
-    id: nextId("prt"),
-    sessionID,
-    messageID: assistant.info.id,
-    type: "text",
-    text: "Working…",
-  }
-  appendPart(sessionID, assistant, answer)
-
-  await delay(40)
-
+  // A permission request pauses the turn until the client replies through
+  // `POST /api/session/:id/permission/:requestID/reply`.
   const permissionID = nextId("per")
-  const request = {
+  const request: Record<string, unknown> = {
     id: permissionID,
     sessionID,
-    permission: "bash",
-    patterns: ["ls"],
+    action: "bash",
+    resources: ["ls"],
+    save: ["ls *"],
     metadata: { command: "ls" },
-    always: ["ls *"],
-    tool: { messageID: assistant.info.id, callID: nextId("call") },
   }
-  const decision = new Promise<unknown>((resolve) =>
-    pendingPermissions.set(permissionID, { request, sessionID, resolve }),
+  const decision = new Promise<string>((resolve) =>
+    pendingPermissions.set(permissionID, {
+      request,
+      sessionID,
+      directory: session.location.directory,
+      resolve,
+    }),
   )
-  broadcast({ type: "permission.asked", properties: request })
+  broadcast("permission.asked", request, session.location.directory)
   await decision
+  pendingPermissions.delete(permissionID)
 
-  await delay(40)
-  answer.text = "Done!"
-  broadcast({ type: "message.part.updated", properties: { part: { ...answer } } })
-  assistant.info.time.completed = now()
-  assistant.info.tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
-  broadcast({ type: "message.updated", properties: { info: assistant.info } })
-  broadcast({ type: "session.status", properties: { sessionID, status: { type: "idle" } } })
-  broadcast({ type: "session.idle", properties: { sessionID } })
+  await delay(30)
+
+  assistant.content = [{ type: "text", text: "Done!" }]
+  broadcast(
+    "session.text.ended",
+    { sessionID, assistantMessageID: assistant.id, ordinal: 0, text: "Done!" },
+    session.location.directory,
+  )
+  completeAssistant(session, assistant, {
+    cost: 0.001,
+    tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+  activeRuns.delete(sessionID)
 }
+
+const MODELS = [
+  { id: "test-model", providerID: "test", name: "Test Model", variants: [{ id: "low" }, { id: "high" }] },
+  { id: "alpha", providerID: "test", name: "Alpha", variants: [] },
+  { id: "beta", providerID: "test", name: "Beta", variants: [] },
+  { id: "gamma", providerID: "test", name: "Gamma", variants: [] },
+  { id: "delta", providerID: "test", name: "Delta", variants: [] },
+  { id: "solo", providerID: "other", name: "Solo", variants: [] },
+  { id: "echo", providerID: "other", name: "Echo", variants: [] },
+  { id: "nova", providerID: "other", name: "Nova", variants: [] },
+  { id: "flash", providerID: "other", name: "Flash", variants: [] },
+].map((model) => ({
+  ...model,
+  modelID: model.id,
+  enabled: true,
+  status: "active",
+  capabilities: {},
+  cost: [],
+  limit: { context: 128_000, output: 8_192 },
+  time: { released: 0 },
+}))
+
+const PROVIDERS = [
+  { id: "test", name: "Test", activation: "auto", package: "" },
+  { id: "other", name: "Other", activation: "auto", package: "" },
+]
+
+const AGENTS = [
+  { id: "build", name: "build", mode: "primary", hidden: false },
+  { id: "plan", name: "plan", mode: "primary", hidden: false },
+  { id: "general", name: "general", mode: "subagent", hidden: false },
+  { id: "explore", name: "explore", mode: "subagent", hidden: false },
+  { id: "title", name: "title", mode: "primary", hidden: true },
+]
+
+const DEFAULT_DIRECTORY = "/e2e/project"
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost")
@@ -325,93 +422,131 @@ const server = createServer((req, res) => {
   const segments = path.split("/").filter(Boolean)
 
   void (async () => {
-    if (req.method === "GET" && path === "/global/health") return json(res, 200, { healthy: true, version: "1.18.32" })
-    if (req.method === "GET" && path === "/global/event") return openStream(res)
-    if (req.method === "GET" && path === "/permission") {
+    // Playwright's readiness probe for the mock itself.
+    if (req.method === "GET" && path === "/global/health") return json(res, 200, { healthy: true, version: "2.0.6" })
+    if (req.method === "GET" && path === "/api/info") {
+      return json(res, 200, { version: "2.0.6", pid: 1, urls: [], paths: { tmp: "/tmp" } })
+    }
+    if (req.method === "GET" && path === "/api/event") return openStream(res)
+
+    if (req.method === "GET" && path === "/api/session") {
       const directory = url.searchParams.get("directory")
+      const list = [...sessions.values()].filter((session) => !directory || session.location.directory === directory)
+      return json(res, 200, { data: list, cursor: { previous: null, next: null } })
+    }
+    if (req.method === "POST" && path === "/api/session") {
+      const body = await readBody(req)
+      const location = (body.location ?? {}) as { directory?: unknown }
+      const directory = typeof location.directory === "string" ? location.directory : DEFAULT_DIRECTORY
+      return json(res, 200, { data: createSession({ directory }) })
+    }
+    if (req.method === "GET" && path === "/api/session/active") {
+      const active = Object.fromEntries([...activeRuns].map((sessionID) => [sessionID, { type: "running" }]))
+      return json(res, 200, { data: active })
+    }
+    if (req.method === "GET" && path === "/api/permission/request") {
+      const directory = url.searchParams.get("location[directory]")
       const list = [...pendingPermissions.values()]
-        .filter((pending) => !directory || sessions.get(pending.sessionID)?.directory === directory)
+        .filter((pending) => !directory || pending.directory === directory)
         .map((pending) => pending.request)
-      return json(res, 200, list)
+      return json(res, 200, { location: { directory: directory ?? "/e2e" }, data: list })
     }
-    if (req.method === "GET" && path === "/session") {
-      const directory = url.searchParams.get("directory")
-      const list = [...sessions.values()].filter((session) => !directory || session.directory === directory)
-      return json(res, 200, list)
+    if (req.method === "GET" && path === "/api/agent") {
+      return json(res, 200, { location: { directory: "/e2e" }, data: AGENTS })
     }
-    if (req.method === "POST" && path === "/session") return json(res, 200, createSession(requestDirectory(req, url)))
-    if (req.method === "GET" && path === "/session/status") return json(res, 200, {})
-    if (req.method === "GET" && path === "/project") return json(res, 200, [])
-    if (req.method === "GET" && path === "/config") return json(res, 200, { model: "test/test-model" })
-    if (req.method === "GET" && path === "/agent") {
-      return json(res, 200, [
-        { name: "build", mode: "primary" },
-        { name: "plan", mode: "primary" },
-        { name: "title", mode: "primary", hidden: true },
-      ])
+    if (req.method === "GET" && path === "/api/model") {
+      return json(res, 200, { location: { directory: "/e2e" }, data: MODELS })
     }
-    if (req.method === "GET" && path === "/config/providers") {
-      return json(res, 200, {
-        providers: [
-          {
-            id: "test",
-            name: "Test",
-            models: {
-              "test-model": { id: "test-model", name: "Test Model", variants: { low: {}, high: {} } },
-              alpha: { id: "alpha", name: "Alpha", variants: {} },
-              beta: { id: "beta", name: "Beta", variants: {} },
-              gamma: { id: "gamma", name: "Gamma", variants: {} },
-              delta: { id: "delta", name: "Delta", variants: {} },
-            },
-          },
-          {
-            id: "other",
-            name: "Other",
-            models: {
-              solo: { id: "solo", name: "Solo", variants: {} },
-              echo: { id: "echo", name: "Echo", variants: {} },
-              nova: { id: "nova", name: "Nova", variants: {} },
-              flash: { id: "flash", name: "Flash", variants: {} },
-            },
-          },
-        ],
-        default: { test: "test-model" },
-      })
+    if (req.method === "GET" && path === "/api/model/default") {
+      return json(res, 200, { location: { directory: "/e2e" }, data: MODELS[0] })
+    }
+    if (req.method === "GET" && path === "/api/provider") {
+      return json(res, 200, { location: { directory: "/e2e" }, data: PROVIDERS })
     }
 
-    if (segments[0] === "session" && segments[1]) {
-      const sessionID = segments[1]
-      if (req.method === "GET" && segments.length === 3 && segments[2] === "message") {
-        return json(res, 200, conversations.get(sessionID) ?? [])
+    // The BFF writes the preview-port instruction entry on session create/start.
+    if (
+      req.method === "PUT" &&
+      segments[0] === "api" &&
+      segments[1] === "experimental" &&
+      segments[2] === "session" &&
+      segments[4] === "instructions" &&
+      segments[5] === "entries"
+    ) {
+      await readBody(req)
+      return empty(res, 204)
+    }
+
+    if (segments[0] === "api" && segments[1] === "session" && segments[2]) {
+      const sessionID = decodeURIComponent(segments[2])
+      const session = sessions.get(sessionID)
+
+      if (req.method === "GET" && segments[3] === "message") {
+        const messages = [...(conversations.get(sessionID) ?? [])].sort((a, b) => a.time.created - b.time.created)
+        return json(res, 200, { data: messages, cursor: { previous: null, next: null } })
       }
-      if (req.method === "POST" && segments[2] === "prompt_async") {
+      if (req.method === "POST" && segments[3] === "prompt") {
+        if (!session) return json(res, 404, { error: "not_found" })
         const body = await readBody(req)
-        const parts = Array.isArray(body.parts) ? (body.parts as Array<{ text?: string }>) : []
-        res.writeHead(204)
-        res.end()
-        void runPrompt(sessionID, parts[0]?.text ?? "hello", body)
+        const text = typeof body.text === "string" ? body.text : ""
+        const message = appendUserMessage(sessionID, text)
+        json(res, 200, {
+          data: {
+            id: message.id,
+            sessionID,
+            time: { created: message.time.created },
+            type: "user",
+            payload: { text },
+            delivery: "steer",
+          },
+        })
+        void runPrompt(sessionID, text)
         return
       }
-      if (req.method === "POST" && segments[2] === "abort") return json(res, 200, true)
-      if (req.method === "DELETE" && segments.length === 2) {
-        const session = sessions.get(sessionID)
+      if (req.method === "POST" && segments[3] === "agent") {
+        const body = await readBody(req)
+        if (session && typeof body.agent === "string") {
+          session.agent = body.agent
+          session.time.updated = now()
+        }
+        return empty(res, 204)
+      }
+      if (req.method === "POST" && segments[3] === "model") {
+        const body = await readBody(req)
+        const model = body.model as ModelRef | undefined
+        if (session && model && typeof model.id === "string" && typeof model.providerID === "string") {
+          session.model = model
+          session.time.updated = now()
+        }
+        return empty(res, 204)
+      }
+      if (req.method === "POST" && segments[3] === "interrupt") {
+        return json(res, 200, { interrupted: true })
+      }
+      if (req.method === "POST" && segments[3] === "permission" && segments[4] && segments[5] === "reply") {
+        const body = await readBody(req)
+        const pending = pendingPermissions.get(segments[4])
+        if (pending) {
+          pendingPermissions.delete(segments[4])
+          const decision = typeof body.decision === "string" ? body.decision : "reject"
+          broadcast(
+            "permission.replied",
+            { sessionID: pending.sessionID, requestID: segments[4], reply: decision },
+            pending.directory,
+          )
+          pending.resolve(decision)
+        }
+        return empty(res, 204)
+      }
+      if (req.method === "DELETE" && segments.length === 3) {
         sessions.delete(sessionID)
         conversations.delete(sessionID)
-        if (session) broadcast({ type: "session.deleted", properties: { info: session } })
-        return json(res, 200, true)
-      }
-      if (req.method === "POST" && segments[2] === "permissions" && segments[3]) {
-        const pending = pendingPermissions.get(segments[3])
-        if (pending) {
-          const body = await readBody(req)
-          pendingPermissions.delete(segments[3])
-          broadcast({
-            type: "permission.replied",
-            properties: { sessionID: pending.sessionID, requestID: segments[3], reply: body.response },
-          })
-          pending.resolve(body)
+        activeRuns.delete(sessionID)
+        for (const [id, pending] of pendingPermissions) {
+          if (pending.sessionID === sessionID) pendingPermissions.delete(id)
         }
-        return json(res, 200, true)
+        broadcast("session.deleted", { sessionID }, session?.location.directory)
+        return empty(res, 204)
       }
     }
 

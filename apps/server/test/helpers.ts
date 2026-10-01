@@ -22,7 +22,14 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 8000, interv
 
 export interface MockOpencode {
   url: string
-  requests: { method: string; path: string; authorization?: string; directory?: string; body?: string }[]
+  requests: {
+    method: string
+    path: string
+    query?: string
+    authorization?: string
+    headers: Record<string, string>
+    body?: string
+  }[]
   emit(event: unknown): void
   close(): Promise<void>
 }
@@ -30,6 +37,7 @@ export interface MockOpencode {
 export async function startMockOpencode(): Promise<MockOpencode> {
   const requests: MockOpencode["requests"] = []
   const sseClients = new Set<import("node:http").ServerResponse>()
+  let sessionCounter = 0
 
   const server = createServer((req, res) => {
     let body = ""
@@ -37,31 +45,74 @@ export async function startMockOpencode(): Promise<MockOpencode> {
       body += chunk
     })
     req.on("end", () => {
-      const path = req.url ?? ""
+      const [path = "/", search] = (req.url ?? "").split("?")
+      const headers: Record<string, string> = {}
+      for (const [name, value] of Object.entries(req.headers)) {
+        if (typeof value === "string") headers[name] = value
+      }
       requests.push({
         method: req.method ?? "",
         path,
+        query: search,
         authorization: req.headers.authorization,
-        directory: typeof req.headers["x-opencode-directory"] === "string" ? req.headers["x-opencode-directory"] : undefined,
+        headers,
         body: body || undefined,
       })
 
-      if (req.method === "GET" && path === "/global/health") {
+      if (req.method === "GET" && path === "/api/info") {
         res.writeHead(200, { "content-type": "application/json" })
-        res.end(JSON.stringify({ healthy: true, version: "1.2.3" }))
+        res.end(
+          JSON.stringify({
+            version: "1.2.3",
+            pid: 4242,
+            urls: ["http://127.0.0.1:4096"],
+            paths: { home: "/root", data: "/root/.local/share/opencode" },
+          }),
+        )
         return
       }
 
-      if (req.method === "POST" && path.startsWith("/session/") && path.endsWith("/prompt_async")) {
+      if (req.method === "GET" && path === "/api/session") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ data: [], cursor: { previous: null, next: null } }))
+        return
+      }
+
+      if (req.method === "POST" && path === "/api/session") {
+        sessionCounter += 1
+        let directory = ""
+        try {
+          directory = (JSON.parse(body) as { location?: { directory?: string } }).location?.directory ?? ""
+        } catch {
+          // an empty body is fine for the mock
+        }
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ data: { id: `ses_mock_${sessionCounter}`, directory } }))
+        return
+      }
+
+      if (req.method === "PUT" && path.includes("/instructions/entries/")) {
         res.writeHead(204)
         res.end()
         return
       }
 
-      if (req.method === "GET" && path === "/global/event") {
+      if (req.method === "DELETE" && path.startsWith("/api/session/")) {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+
+      if (req.method === "POST" && path.includes("/session/") && path.endsWith("/prompt_async")) {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+
+      if (req.method === "GET" && path === "/api/event") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
         res.write(
-          `data: ${JSON.stringify({ directory: "/test", payload: { type: "server.connected", properties: {} } })}\n\n`,
+          `data: ${JSON.stringify({ id: "evt_connected", type: "server.connected", data: {} })}\n\n`,
         )
         sseClients.add(res)
         res.on("close", () => sseClients.delete(res))
@@ -81,7 +132,7 @@ export async function startMockOpencode(): Promise<MockOpencode> {
     requests,
     emit(event) {
       for (const client of sseClients) {
-        client.write(`data: ${JSON.stringify({ directory: "/test", payload: event })}\n\n`)
+        client.write(`data: ${JSON.stringify(event)}\n\n`)
       }
     },
     close: () =>
@@ -246,7 +297,7 @@ export async function startTestApp(
   const config = testConfig(options.config)
   const store = createMemoryStore()
   const hub = createEventHub({
-    url: new URL("/global/event", config.opencodeUrl).toString(),
+    url: new URL("/api/event", config.opencodeUrl).toString(),
     authHeader: config.opencodeAuth,
     reconnectBaseMs: 50,
     reconnectMaxMs: 200,

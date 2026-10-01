@@ -1,23 +1,17 @@
 import { ApiError } from "./client"
+import type { SessionStructuredError } from "./types"
 
 /**
- * Turns an opencode `session.error` payload into a concise message for the UI.
- * Returns `null` for user-initiated aborts (expected, not worth a banner).
+ * Turns an opencode structured error (`session.execution.failed`, assistant
+ * message error) into a concise message for the UI. Returns `null` for
+ * user-initiated aborts (expected, not worth a banner).
  */
-export function opencodeErrorMessage(error: unknown): string | null {
+export function opencodeErrorMessage(error: SessionStructuredError | null | undefined): string | null {
   if (!error || typeof error !== "object") return "The agent reported an error"
-  const name = (error as { name?: unknown }).name
-  if (name === "MessageAbortedError") return null
+  if (error.type === "MessageAbortedError") return null
 
-  const data = (error as { data?: unknown }).data
-  const raw = data && typeof data === "object" ? (data as { message?: unknown }).message : undefined
-  const message = typeof raw === "string" ? raw.split("\n")[0]?.trim() : ""
+  const message = typeof error.message === "string" ? error.message.split("\n")[0]?.trim() : ""
   if (message) return message
-
-  const providerID = data && typeof data === "object" ? (data as { providerID?: unknown }).providerID : undefined
-  if (name === "ProviderAuthError" && typeof providerID === "string") {
-    return `Provider "${providerID}" is not authenticated`
-  }
   return "The agent reported an error"
 }
 
@@ -28,6 +22,26 @@ function apiErrorCode(error: ApiError): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Message shown when a conversation fails to load. Detects the opencode
+ * credential mismatch (the BFF and `opencode serve` must share
+ * `OPENCODE_SERVER_PASSWORD`), the most common setup failure.
+ */
+export function conversationErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const code = apiErrorCode(error)
+    if (code === "opencode_unauthorized") {
+      return "opencode rejected MasterHand's credentials. MasterHand and opencode must share OPENCODE_SERVER_PASSWORD: set it in apps/server/.env.local (or unset it in opencode), then restart both."
+    }
+    if (code === "opencode_unreachable") {
+      return "opencode is not reachable. Is its server running?"
+    }
+    const message = error.message.split("\n")[0]?.trim()
+    if (message && !message.startsWith("{")) return message
+  }
+  return "Could not load the conversation"
 }
 
 /** Human-readable message for a failed preview Start. */

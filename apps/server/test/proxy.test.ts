@@ -19,11 +19,11 @@ describe("opencode proxy", () => {
     app = await startTestApp({ config: { opencodeUrl: upstream.url, opencodeAuth: TEST_AUTH } })
     const cookie = await login(app.url)
 
-    const response = await fetch(`${app.url}/api/oc/global/health`, { headers: { cookie } })
+    const response = await fetch(`${app.url}/api/oc/api/info`, { headers: { cookie } })
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ healthy: true, version: "1.2.3" })
+    expect(await response.json()).toMatchObject({ version: "1.2.3" })
 
-    const proxied = upstream.requests.find((request) => request.path === "/global/health")
+    const proxied = upstream.requests.find((request) => request.path === "/api/info")
     expect(proxied?.authorization).toBe(TEST_AUTH)
   })
 
@@ -32,7 +32,7 @@ describe("opencode proxy", () => {
     app = await startTestApp({ config: { opencodeUrl: upstream.url, opencodeAuth: TEST_AUTH } })
     const cookie = await login(app.url)
 
-    const response = await fetch(`${app.url}/api/oc/session/ses_1/prompt_async`, {
+    const response = await fetch(`${app.url}/api/oc/api/session/ses_1/prompt_async`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
       body: JSON.stringify({ parts: [{ type: "text", text: "hello" }] }),
@@ -41,72 +41,41 @@ describe("opencode proxy", () => {
 
     const proxied = upstream.requests.find((request) => request.path.includes("prompt_async"))
     expect(proxied).toBeDefined()
-    const forwarded = JSON.parse(proxied?.body ?? "{}") as { parts: unknown; system?: string }
-    expect(forwarded.parts).toEqual([{ type: "text", text: "hello" }])
-    // The reserved preview port is appended to the prompt without touching parts.
-    expect(forwarded.system).toContain("0.0.0.0")
+    // v2 no longer injects a `system` instruction: the body is byte-identical.
+    expect(JSON.parse(proxied?.body ?? "{}")).toEqual({ parts: [{ type: "text", text: "hello" }] })
   })
 
-  it("appends the preview instruction to an existing system prompt", async () => {
+  it("leaves an existing system prompt untouched", async () => {
     upstream = await startMockOpencode()
     app = await startTestApp({ config: { opencodeUrl: upstream.url } })
     const cookie = await login(app.url)
 
-    await fetch(`${app.url}/api/oc/session/ses_7/message`, {
+    await fetch(`${app.url}/api/oc/api/session/ses_7/message`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
       body: JSON.stringify({ parts: [{ type: "text", text: "hi" }], system: "Be terse." }),
     })
 
     const proxied = upstream.requests.find((request) => request.path.includes("/message"))
-    const forwarded = JSON.parse(proxied?.body ?? "{}") as { system: string }
-    expect(forwarded.system.startsWith("Be terse.\n")).toBe(true)
-    expect(forwarded.system).toContain("0.0.0.0")
-  })
-
-  it("leaves prompts untouched when previews are disabled", async () => {
-    upstream = await startMockOpencode()
-    app = await startTestApp({ config: { opencodeUrl: upstream.url, previewEnabled: false } })
-    const cookie = await login(app.url)
-
-    await fetch(`${app.url}/api/oc/session/ses_8/prompt_async`, {
-      method: "POST",
-      headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ parts: [{ type: "text", text: "hello" }] }),
+    expect(JSON.parse(proxied?.body ?? "{}")).toEqual({
+      parts: [{ type: "text", text: "hi" }],
+      system: "Be terse.",
     })
-
-    const proxied = upstream.requests.find((request) => request.path.includes("prompt_async"))
-    expect(JSON.parse(proxied?.body ?? "{}")).toEqual({ parts: [{ type: "text", text: "hello" }] })
   })
 
-  it("does not inject into non-prompt endpoints", async () => {
-    upstream = await startMockOpencode()
-    app = await startTestApp({ config: { opencodeUrl: upstream.url } })
-    const cookie = await login(app.url)
-
-    await fetch(`${app.url}/api/oc/session/ses_9/permissions/perm_1`, {
-      method: "POST",
-      headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ response: "once" }),
-    })
-
-    const proxied = upstream.requests.find((request) => request.path.includes("permissions"))
-    expect(JSON.parse(proxied?.body ?? "{}")).toEqual({ response: "once" })
-  })
-
-  it("forwards the x-opencode-directory header on mutations", async () => {
+  it("forwards the query string and allowed headers, but not the directory header", async () => {
     upstream = await startMockOpencode()
     app = await startTestApp({ config: { opencodeUrl: upstream.url, opencodeAuth: TEST_AUTH } })
     const cookie = await login(app.url)
 
-    await fetch(`${app.url}/api/oc/session`, {
-      method: "POST",
-      headers: { cookie, "content-type": "application/json", "x-opencode-directory": "/workspace/app" },
-      body: "{}",
+    await fetch(`${app.url}/api/oc/api/session?directory=%2Fworkspace%2Fapp&limit=200`, {
+      headers: { cookie, "x-opencode-directory": "/workspace/app", "accept-language": "es-ES" },
     })
 
-    const proxied = upstream.requests.find((request) => request.path === "/session")
-    expect(proxied?.directory).toBe("/workspace/app")
+    const proxied = upstream.requests.find((request) => request.path === "/api/session")
+    expect(proxied?.query).toBe("directory=%2Fworkspace%2Fapp&limit=200")
+    expect(proxied?.headers["accept-language"]).toBe("es-ES")
+    expect(proxied?.headers["x-opencode-directory"]).toBeUndefined()
     expect(proxied?.authorization).toBe(TEST_AUTH)
   })
 
@@ -114,7 +83,7 @@ describe("opencode proxy", () => {
     upstream = await startMockOpencode()
     app = await startTestApp({ config: { opencodeUrl: upstream.url, opencodeAuth: TEST_AUTH } })
 
-    const response = await fetch(`${app.url}/api/oc/global/health`)
+    const response = await fetch(`${app.url}/api/oc/api/info`)
     expect(response.status).toBe(401)
   })
 
@@ -122,8 +91,18 @@ describe("opencode proxy", () => {
     app = await startTestApp({ config: { opencodeUrl: "http://127.0.0.1:1" } })
     const cookie = await login(app.url)
 
-    const response = await fetch(`${app.url}/api/oc/global/health`, { headers: { cookie } })
+    const response = await fetch(`${app.url}/api/oc/api/info`, { headers: { cookie } })
     expect(response.status).toBe(502)
+  })
+
+  it("maps an opencode 401 to an actionable 502 instead of relaying it", async () => {
+    const stub: typeof fetch = async () => new Response("unauthorized", { status: 401 })
+    app = await startTestApp({ fetchImpl: stub })
+    const cookie = await login(app.url)
+
+    const response = await fetch(`${app.url}/api/oc/api/session`, { headers: { cookie } })
+    expect(response.status).toBe(502)
+    expect(await response.json()).toEqual({ error: "opencode_unauthorized" })
   })
 
   it("keeps the upstream origin fixed for protocol-relative paths (SSRF)", async () => {
@@ -157,8 +136,8 @@ describe("SSE relay", () => {
     expect(response.status).toBe(200)
     expect(response.headers.get("content-type")).toContain("text/event-stream")
 
-    await waitFor(() => upstream!.requests.some((request) => request.path === "/global/event"))
-    upstream.emit({ type: "session.idle", properties: { sessionID: "ses_42" } })
+    await waitFor(() => upstream!.requests.some((request) => request.path === "/api/event"))
+    upstream.emit({ id: "evt_42", type: "session.idle", data: { sessionID: "ses_42" } })
 
     const reader = response.body!.getReader()
     const received = await readUntil(reader, "session.idle")

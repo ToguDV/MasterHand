@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
+  conversationErrorMessage,
   sessionUsage,
   useMessages,
   type FinishSessionResult,
@@ -15,7 +16,7 @@ export function ChatView({
   sessionID,
   busy,
   connected,
-  directory,
+  workspaceID,
   isolation,
   autoAccept,
   onToggleAutoAccept,
@@ -24,14 +25,14 @@ export function ChatView({
   sessionID: string
   busy: boolean
   connected: boolean
-  directory?: string | null
+  workspaceID: string | null
   isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
   onOpenSession?: (id: string) => void
 }) {
   const queryClient = useQueryClient()
-  const messagesQuery = useMessages(client, sessionID, { busy, connected, directory })
+  const messagesQuery = useMessages(client, sessionID, { busy, connected })
   const [finishing, setFinishing] = useState(false)
   const [finishResult, setFinishResult] = useState<FinishSessionResult | null>(null)
   const [finishError, setFinishError] = useState<string | null>(null)
@@ -76,7 +77,7 @@ export function ChatView({
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
           {messagesQuery.isLoading && <p className="text-center text-sm text-zinc-500">Loading conversation…</p>}
           {messagesQuery.error && (
-            <p className="text-center text-sm text-red-400">Could not load the conversation</p>
+            <p className="text-center text-sm text-red-400">{conversationErrorMessage(messagesQuery.error)}</p>
           )}
           {!messagesQuery.isLoading && messages.length === 0 && (
             <p className="py-12 text-center text-sm text-zinc-500">
@@ -155,7 +156,7 @@ export function ChatView({
       <Composer
         sessionID={sessionID}
         busy={busy}
-        directory={directory}
+        workspaceID={workspaceID}
         autoAccept={autoAccept}
         onToggleAutoAccept={onToggleAutoAccept}
       />

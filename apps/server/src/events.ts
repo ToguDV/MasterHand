@@ -28,15 +28,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+/**
+ * opencode v2 emits one JSON event object per SSE frame
+ * (`{ id, type, location?, data, durable? }`); MasterHand forwards it as-is.
+ */
 export function normalizeEvent(raw: unknown): unknown | null {
-  if (!raw || typeof raw !== "object") return raw
-  const payload = (raw as { payload?: unknown }).payload
-  if (payload && typeof payload === "object") {
-    const inner = payload as { type?: unknown }
-    if (inner.type === "sync") return null
-    if (typeof inner.type === "string") return inner
-  }
-  return raw
+  if (!raw || typeof raw !== "object") return null
+  const type = (raw as { type?: unknown }).type
+  return typeof type === "string" ? raw : null
 }
 
 export function createEventHub(options: EventHubOptions): EventHub {

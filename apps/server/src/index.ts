@@ -15,7 +15,7 @@ mkdirSync(config.dataDir, { recursive: true })
 const store = createSqliteStore(join(config.dataDir, "masterhand.sqlite"))
 
 const hub = createEventHub({
-  url: new URL("/global/event", config.opencodeUrl).toString(),
+  url: new URL("/api/event", config.opencodeUrl).toString(),
   authHeader: config.opencodeAuth,
 })
 

@@ -7,6 +7,7 @@
 //   node scripts/dev.mjs desktop  -> opencode + BFF + Electron
 //   node scripts/dev.mjs server   -> opencode + BFF
 import { spawn } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -61,6 +62,35 @@ function isPortOpen(host, port, timeout = 500) {
   })
 }
 
+/**
+ * When MasterHand reuses an opencode that it did not start, the pair only
+ * works if both share OPENCODE_SERVER_PASSWORD. Probe it and warn early
+ * instead of failing later with 401s and a "could not load conversation".
+ */
+async function warnOnOpencodeAuthMismatch() {
+  const url = `http://${opencodeHost}:${opencodePort}/api/info`
+  try {
+    const probe = await fetch(url, { signal: AbortSignal.timeout(1500) })
+    if (probe.status !== 401 && probe.status !== 403) return
+    const password = process.env.OPENCODE_SERVER_PASSWORD
+    if (!password) {
+      console.error("[dev] WARNING: the running opencode requires a password but OPENCODE_SERVER_PASSWORD is not set.")
+      console.error("[dev]   opencode v2 always requires auth; when started without the env var it generates and prints one (`server password <value>`).")
+      console.error("[dev]   Copy that value into apps/server/.env.local, or stop that opencode and let this script start it.")
+      return
+    }
+    const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode"
+    const auth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64")
+    const check = await fetch(url, { headers: { authorization: auth }, signal: AbortSignal.timeout(1500) })
+    if (check.status === 401 || check.status === 403) {
+      console.error("[dev] WARNING: OPENCODE_SERVER_PASSWORD does not match the running opencode's password.")
+      console.error("[dev]   Restart the reused opencode with the same value, or update apps/server/.env.local.")
+    }
+  } catch {
+    // The BFF reports reachability; this is just an early hint.
+  }
+}
+
 function killTree(child) {
   try {
     if (process.platform === "win32") {
@@ -92,7 +122,7 @@ function spawnChild(label, command, args) {
     if (error.code === "ENOENT") {
       console.error(`[dev] ${label}: command not found (${command})`)
       if (label === "opencode") {
-        console.error("[dev] install opencode (https://opencode.ai/docs/) or set MASTERHAND_SKIP_OPENCODE=1")
+        console.error("[dev] install opencode v2 (npm install -g @opencode/cli) or set MASTERHAND_SKIP_OPENCODE=1")
       }
     } else {
       console.error(`[dev] ${label} failed: ${error.message}`)
@@ -110,9 +140,18 @@ function spawnChild(label, command, args) {
 async function main() {
   if (process.env.MASTERHAND_SKIP_OPENCODE === "1") {
     console.log("[dev] opencode skipped (MASTERHAND_SKIP_OPENCODE=1)")
+    await warnOnOpencodeAuthMismatch()
   } else if (await isPortOpen(opencodeHost, opencodePort)) {
     console.log(`[dev] opencode already listening on ${opencodeHost}:${opencodePort}, skipping`)
+    await warnOnOpencodeAuthMismatch()
   } else {
+    // opencode v2 always requires HTTP basic auth; when no password is
+    // configured it generates one and the BFF could never know it. Generate a
+    // shared password so both children authenticate against each other.
+    if (!process.env.OPENCODE_SERVER_PASSWORD) {
+      process.env.OPENCODE_SERVER_PASSWORD = randomBytes(18).toString("base64url")
+      console.log("[dev] generated OPENCODE_SERVER_PASSWORD for this session (shared by opencode and the BFF)")
+    }
     console.log(`[dev] starting opencode serve on ${opencodeHost}:${opencodePort}`)
     spawnChild("opencode", "opencode", ["serve", "--hostname", opencodeHost, "--port", String(opencodePort)])
   }

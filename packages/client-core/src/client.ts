@@ -1,23 +1,24 @@
+import { OpenCode } from "@opencode/client"
+import type { Permission, PermissionResponse } from "./types"
 import type {
   AgentInfo,
   BffStatus,
-  Config,
+  ChatMessage,
   CreateSessionInput,
   CreateWorkspaceInput,
   DeviceLoginResponse,
   DeviceRecord,
   FinishSessionResult,
-  MessageWithPartsResponse,
-  Permission,
-  PermissionResponse,
+  ModelsCatalog,
+  Permission as PermissionType,
   PreviewStatus,
-  Project,
-  PromptBody,
-  ProvidersResponse,
+  PromptContext,
+  PromptInput,
   Session,
   SessionStatuses,
   WorkspaceRecord,
 } from "./types"
+import { toChatMessage } from "./chat"
 import { createEventStream, type EventStream, type EventStreamOptions } from "./events"
 
 export class ApiError extends Error {
@@ -59,27 +60,31 @@ export interface Client {
     sessions: {
       list(workspaceID: string): Promise<Session[]>
       create(workspaceID: string, input?: CreateSessionInput): Promise<Session>
-      remove(workspaceID: string, sessionID: string, directory?: string | null): Promise<void>
+      remove(workspaceID: string, sessionID: string): Promise<void>
       finish(sessionID: string): Promise<FinishSessionResult>
       /** Directories that may hold sessions for the workspace (base + worktrees). */
       directories(workspaceID: string): Promise<string[]>
     }
-    abortSession(id: string, directory?: string | null): Promise<boolean>
-    messages(id: string, directory?: string | null): Promise<MessageWithPartsResponse[]>
-    promptAsync(id: string, body: PromptBody, directory?: string | null): Promise<void>
-    /** Pending permission requests. opencode scopes this by `directory`. */
+    /** Full message history of a session, oldest first (v2 cursor API paginated). */
+    messages(sessionID: string): Promise<ChatMessage[]>
+    /**
+     * Sends a prompt. When `current` is provided, the agent/model are switched
+     * first only if they differ (opencode records a message per switch).
+     */
+    prompt(sessionID: string, input: PromptInput, current?: PromptContext): Promise<void>
+    /** Interrupts the running turn; returns whether anything was interrupted. */
+    abortSession(sessionID: string): Promise<boolean>
+    /** Pending permission requests, optionally scoped to a location. */
     permissions(directory?: string | null): Promise<Permission[]>
     respondPermission(
       sessionID: string,
       permissionID: string,
       response: PermissionResponse,
-      directory?: string | null,
-    ): Promise<boolean>
+    ): Promise<void>
     agents(): Promise<AgentInfo[]>
-    providers(): Promise<ProvidersResponse>
-    config(): Promise<Config>
+    /** Models, providers and server default model for the composer selectors. */
+    models(): Promise<ModelsCatalog>
     statuses(): Promise<SessionStatuses>
-    projects(): Promise<Project[]>
     /** Live preview (Cloudflare quick tunnel) for a session. */
     preview(sessionID: string): Promise<PreviewStatus>
     startPreview(sessionID: string): Promise<PreviewStatus>
@@ -91,6 +96,25 @@ export interface Client {
     remove(id: string, options?: { deleteFiles?: boolean }): Promise<void>
   }
   eventStream(options: Omit<EventStreamOptions, "baseUrl" | "getToken" | "fetchImpl">): EventStream
+}
+
+const MESSAGE_PAGE_SIZE = 200
+const MAX_MESSAGE_PAGES = 50
+
+function sameModel(a: PromptContext["model"], b: PromptContext["model"]): boolean {
+  if (!a || !b) return false
+  return (
+    a.id === b.id &&
+    a.providerID === b.providerID &&
+    (a.variant ?? undefined) === (b.variant ?? undefined)
+  )
+}
+
+/** Absolute origin the generated opencode client needs; empty baseUrl means same-origin. */
+function resolveOrigin(baseUrl: string): string {
+  if (baseUrl) return baseUrl
+  const location = (globalThis as { location?: { origin?: string } }).location
+  return location?.origin ?? "http://localhost"
 }
 
 export function createClient(options: ClientOptions = {}): Client {
@@ -116,24 +140,62 @@ export function createClient(options: ClientOptions = {}): Client {
   }
 
   /**
-   * Mirrors the opencode SDK: the `directory` override travels as a query
-   * parameter on GET/HEAD and as the `x-opencode-directory` header on mutations.
+   * Fetch used by the generated opencode client: injects the device token,
+   * keeps same-origin cookies and normalizes failures into `ApiError` (so the
+   * UI's 401 handling matches the BFF calls).
    */
-  function withDirectory(path: string, init: RequestInit | undefined, directory?: string | null) {
-    if (!directory) return { path, init }
-    const method = (init?.method ?? "GET").toUpperCase()
-    if (method === "GET" || method === "HEAD") {
-      const separator = path.includes("?") ? "&" : "?"
-      return { path: `${path}${separator}directory=${encodeURIComponent(directory)}`, init }
-    }
+  const authedFetch: typeof fetch = async (input, init) => {
     const headers = new Headers(init?.headers)
-    headers.set("x-opencode-directory", encodeURIComponent(directory))
-    return { path, init: { ...init, headers } }
+    const token = await options.getToken?.()
+    if (token) headers.set("authorization", `Bearer ${token}`)
+    const response = await fetchImpl(input, { ...init, headers, credentials: "same-origin" })
+    if (!response.ok) {
+      if (response.status === 401) options.onUnauthorized?.()
+      const text = await response.text().catch(() => "")
+      throw new ApiError(response.status, text || `HTTP ${response.status}`)
+    }
+    return response
   }
 
-  const opencode = <T>(path: string, init?: RequestInit, directory?: string | null) => {
-    const request_ = withDirectory(`/api/oc${path}`, init, directory)
-    return request<T>(request_.path, request_.init)
+  const opencode = OpenCode.make({
+    baseUrl: `${resolveOrigin(baseUrl)}/api/oc/`,
+    fetch: authedFetch,
+  })
+
+  /**
+   * The generated client wraps everything `fetch` throws (including our
+   * `ApiError`) in its own transport error. Unwrap it so callers keep the
+   * `ApiError` contract (status + body) used across the BFF calls.
+   */
+  async function opencodeRequest<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call()
+    } catch (error) {
+      const cause = (error as { cause?: unknown } | null)?.cause
+      if (cause instanceof ApiError) throw cause
+      throw error
+    }
+  }
+
+  async function listAllMessages(sessionID: string): Promise<ChatMessage[]> {
+    const messages: ChatMessage[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
+      // opencode rejects combining `order` with a cursor: it is only for the first page.
+      const response = await opencode.message.list(
+        cursor
+          ? { sessionID, limit: MESSAGE_PAGE_SIZE, cursor }
+          : { sessionID, order: "asc", limit: MESSAGE_PAGE_SIZE },
+      )
+      for (const message of response.data) {
+        const chat = toChatMessage(message, sessionID)
+        if (chat) messages.push(chat)
+      }
+      const next = response.cursor.next
+      if (!next) break
+      cursor = next
+    }
+    return messages
   }
 
   return {
@@ -163,11 +225,9 @@ export function createClient(options: ClientOptions = {}): Client {
             method: "POST",
             body: JSON.stringify(input ?? {}),
           }).then((response) => response.session),
-        remove: (workspaceID, sessionID, directory) =>
+        remove: (workspaceID, sessionID) =>
           request<void>(
-            `/api/workspaces/${encodeURIComponent(workspaceID)}/sessions/${encodeURIComponent(sessionID)}${
-              directory ? `?directory=${encodeURIComponent(directory)}` : ""
-            }`,
+            `/api/workspaces/${encodeURIComponent(workspaceID)}/sessions/${encodeURIComponent(sessionID)}`,
             { method: "DELETE" },
           ),
         finish: (sessionID) =>
@@ -180,23 +240,56 @@ export function createClient(options: ClientOptions = {}): Client {
             `/api/workspaces/${encodeURIComponent(workspaceID)}/directories`,
           ).then((response) => response.directories),
       },
-      abortSession: (id, directory) =>
-        opencode<boolean>(`/session/${id}/abort`, { method: "POST" }, directory),
-      messages: (id, directory) => opencode<MessageWithPartsResponse[]>(`/session/${id}/message`, undefined, directory),
-      promptAsync: (id, body, directory) =>
-        opencode<void>(`/session/${id}/prompt_async`, { method: "POST", body: JSON.stringify(body) }, directory),
-      permissions: (directory) => opencode<Permission[]>("/permission", undefined, directory),
-      respondPermission: (sessionID, permissionID, response, directory) =>
-        opencode<boolean>(
-          `/session/${sessionID}/permissions/${permissionID}`,
-          { method: "POST", body: JSON.stringify({ response }) },
-          directory,
+      messages: (sessionID) => listAllMessages(sessionID),
+      prompt: async (sessionID, input, current) => {
+        await opencodeRequest(async () => {
+          if (input.agent && input.agent !== current?.agent) {
+            await opencode.session.switchAgent({ sessionID, agent: input.agent })
+          }
+          if (input.model && !sameModel(input.model, current?.model)) {
+            await opencode.session.switchModel({ sessionID, model: input.model })
+          }
+          await opencode.session.prompt({ sessionID, text: input.text })
+        })
+      },
+      abortSession: (sessionID) =>
+        opencodeRequest(() =>
+          opencode.session.interrupt({ sessionID }).then((response) => response.interrupted),
         ),
-      agents: () => opencode<AgentInfo[]>("/agent"),
-      providers: () => opencode<ProvidersResponse>("/config/providers"),
-      config: () => opencode<Config>("/config"),
-      statuses: () => opencode<SessionStatuses>("/session/status"),
-      projects: () => opencode<Project[]>("/project"),
+      permissions: (directory) =>
+        opencodeRequest(() =>
+          opencode.permission.request
+            .list(directory ? { location: { directory } } : undefined)
+            .then((response) => response.data as PermissionType[]),
+        ),
+      respondPermission: (sessionID, permissionID, response) =>
+        opencodeRequest(() =>
+          opencode.permission.reply({ sessionID, requestID: permissionID, decision: response }),
+        ),
+      agents: () =>
+        opencodeRequest(() =>
+          opencode.agent.list().then((response) => response.data as AgentInfo[]),
+        ),
+      models: () =>
+        opencodeRequest(async () => {
+          const [models, providers, defaultModel] = await Promise.all([
+            opencode.model.list(),
+            opencode.provider.list(),
+            opencode.model.default(),
+          ])
+          return {
+            models: models.data,
+            providers: providers.data,
+            defaultModel: defaultModel.data,
+          } satisfies ModelsCatalog
+        }),
+      statuses: () =>
+        opencodeRequest(async () => {
+          const active = await opencode.session.active()
+          return Object.fromEntries(
+            Object.keys(active ?? {}).map((sessionID) => [sessionID, { type: "busy" as const }]),
+          ) as SessionStatuses
+        }),
       preview: (sessionID) =>
         request<{ preview: PreviewStatus }>(`/api/sessions/${encodeURIComponent(sessionID)}/preview`).then(
           (response) => response.preview,
