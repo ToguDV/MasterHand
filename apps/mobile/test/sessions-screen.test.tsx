@@ -131,4 +131,32 @@ describe("SessionsScreen", () => {
 
     alert.mockRestore()
   })
+
+  it("shows the reconnecting banner when the stream is down", async () => {
+    await setup({ connected: false })
+
+    expect(screen.getByText("Reconnecting to the server…")).toBeOnTheScreen()
+  })
+
+  it("shows a loading placeholder while sessions load", async () => {
+    await setup({ sessions: [], loading: true })
+
+    expect(screen.getByText("Loading…")).toBeOnTheScreen()
+  })
+
+  it("explains an empty filter result", async () => {
+    await setup({ sessions: [standard] })
+
+    await fireEvent.press(screen.getAllByText("Isolated")[0]!)
+
+    expect(screen.getByText("No sessions match this filter.")).toBeOnTheScreen()
+  })
+
+  it("signs out from the header", async () => {
+    const handlers = await setup()
+
+    await fireEvent.press(screen.getByText("Sign out"))
+
+    expect(handlers.onSignOut).toHaveBeenCalled()
+  })
 })
