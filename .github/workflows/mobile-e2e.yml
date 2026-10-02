@@ -91,7 +91,11 @@ jobs:
           script: |
             adb reverse tcp:8081 tcp:8081
             adb reverse tcp:8788 tcp:8788
-            APK_URL=$(curl -s https://api.expo.dev/v2/versions/latest | jq -r '.data.androidClientUrl')
+            # The top-level `androidClientUrl` is a stale legacy build; pick the
+            # Expo Go release that matches the app's SDK (from package.json).
+            SDK="$(node -p "require('./apps/mobile/package.json').dependencies.expo.replace(/[^0-9.]/g, '').split('.').slice(0, 2).join('.') + '.0'")"
+            APK_URL="$(curl -s https://api.expo.dev/v2/versions/latest | jq -r --arg sdk "$SDK" '.data.sdkVersions[$sdk].androidClientUrl // .data.androidClientUrl')"
+            echo "Expo Go for SDK $SDK: $APK_URL"
             curl -sL -o /tmp/expo-go.apk "$APK_URL"
             adb install -r /tmp/expo-go.apk
             maestro test apps/mobile/.maestro/chat.yaml \

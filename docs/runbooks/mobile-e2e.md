@@ -40,11 +40,15 @@ PORT=8788 OPENCODE_URL=http://127.0.0.1:4097 \
 # 2. Metro, bound to localhost so `adb reverse` can reach it.
 (cd apps/mobile && npx expo start --port 8081 --localhost) &
 
-# 3. Bridge the emulator's loopback to the host, then install/launch Expo Go
-#    (the flow's `openLink` loads the app). Grab the current Expo Go APK from
-#    https://expo.dev/go or install it from the Play Store once.
+# 3. Bridge the emulator's loopback to the host, then install the Expo Go build
+#    that matches the app's SDK (~57) and launch the project. Do NOT use the
+#    legacy top-level `androidClientUrl` from api.expo.dev: it points at an old
+#    Expo Go that does not support SDK 57.
 adb reverse tcp:8081 tcp:8081
 adb reverse tcp:8788 tcp:8788
+SDK=57.0.0
+APK=$(curl -s https://api.expo.dev/v2/versions/latest | jq -r --arg s ".$SDK" '.data.sdkVersions[$s].androidClientUrl')
+curl -sL -o /tmp/expo-go.apk "$APK" && adb install -r /tmp/expo-go.apk
 
 # 4. Run the flow.
 maestro test apps/mobile/.maestro/chat.yaml \
@@ -53,9 +57,13 @@ maestro test apps/mobile/.maestro/chat.yaml \
   -e MASTERHAND_PASSWORD=e2e-password
 ```
 
-Use a **clean `DATA_DIR`** so the harness starts without workspaces: the flow
-creates one through the UI. Reusing a populated `DATA_DIR` leaves an existing
-workspace selected and the `Add a workspace` step will not find its target.
+The first launch of Expo Go shows a developer-menu onboarding ("Continue") and
+then the dev menu ("Close"); the flow dismisses both automatically.
+
+To re-run locally, force the app back to the login screen with
+`adb shell pm clear host.exp.exponent` (Expo Go keeps the session otherwise);
+the flow's workspace step is conditional, so it does not matter whether the BFF
+already has a workspace — reset `DATA_DIR` only when you want a clean harness.
 
 Iterate on selectors with `maestro studio` (a live inspector against the running
 emulator): the flows target `testID`s (`server-url-input`, `password-input`,
@@ -75,8 +83,9 @@ extra config.
 `.github/workflows/mobile-e2e.yml` runs the same flow on the GitHub
 `ubuntu-latest` runner with `reactivecircus/android-emulator-runner@v2`
 (hardware acceleration / KVM is available there). It starts the mock + BFF and
-Metro, bridges the ports with `adb reverse`, installs the Expo Go APK from
-`https://api.expo.dev/v2/versions/latest` and runs Maestro. Logs and Maestro
+Metro, bridges the ports with `adb reverse`, installs the Expo Go APK matching
+the app's SDK (`sdkVersions[<sdk>].androidClientUrl` from
+`https://api.expo.dev/v2/versions/latest`) and runs Maestro. Logs and Maestro
 screenshots are uploaded on failure.
 
 It is **manual-only (`workflow_dispatch`)** on purpose: it boots an emulator and

@@ -11,15 +11,34 @@ appId: host.exp.exponent
 ---
 - openLink: ${MAESTRO_APP_URL}
 
+# Expo Go's first launch shows a developer-menu onboarding ("Continue") and then
+# the dev menu itself ("Close"); dismiss whichever appears before the app UI.
 - extendedWaitUntil:
     visible: "MasterHand"
     timeout: 90000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Close"
+    commands:
+      - tapOn: "Close"
 
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 30000
+
+# eraseText: the URL field can be prefilled from a previous run's SecureStore.
 - tapOn:
     id: "server-url-input"
+- eraseText
 - inputText: ${MASTERHAND_URL}
 - tapOn:
     id: "password-input"
+- eraseText
 - inputText: ${MASTERHAND_PASSWORD}
 - tapOn: "Sign in"
 
@@ -27,16 +46,21 @@ appId: host.exp.exponent
     visible: "Sessions"
     timeout: 30000
 
-# No workspace on a fresh harness: create one from the bottom sheet.
-- tapOn: "Add a workspace"
-- tapOn: "Add workspace"
-- tapOn:
-    id: "workspace-name-input"
-- inputText: "demo"
-- tapOn: "Add"
-# The sheet stays open after a successful add; dismiss it on the backdrop.
-- tapOn:
-    point: "50%,8%"
+# A fresh harness has no workspace, so create one from the bottom sheet. Reused
+# local runs keep theirs, so the whole step is conditional (idempotent flow).
+- runFlow:
+    when:
+      visible: "Add a workspace"
+    commands:
+      - tapOn: "Add a workspace"
+      - tapOn: "Add workspace"
+      - tapOn:
+          id: "workspace-name-input"
+      - inputText: "demo"
+      - tapOn: "Add"
+      # The sheet stays open after a successful add; dismiss it on the backdrop.
+      - tapOn:
+          point: "50%,8%"
 
 - tapOn:
     id: "new-session-button"
@@ -49,11 +73,10 @@ appId: host.exp.exponent
 - inputText: "hello"
 - tapOn: "Send"
 
+# The mock streams "Working…" and then asks for a permission, which covers that
+# text; wait for the modal directly.
 - extendedWaitUntil:
-    visible: "Working…"
-    timeout: 20000
-- extendedWaitUntil:
-    visible: "Permission required"
+    visible: "(?i)permission required"
     timeout: 20000
 - tapOn: "Once"
 
