@@ -46,6 +46,7 @@ export function createEventHub(options: EventHubOptions): EventHub {
 
   let connected = false
   let stopped = false
+  let started = false
   let abortController: AbortController | null = null
 
   function notify(event: unknown): void {
@@ -104,7 +105,10 @@ export function createEventHub(options: EventHubOptions): EventHub {
 
   return {
     start() {
-      if (!stopped) void run()
+      // Idempotent: a second call must not open a second connection loop.
+      if (stopped || started) return
+      started = true
+      void run()
     },
     stop() {
       stopped = true

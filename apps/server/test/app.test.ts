@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createFakeTunnel, login, startMockOpencode, startTestApp, type MockOpencode, type TestApp } from "./helpers.js"
 
 let app: TestApp | null = null
@@ -196,6 +196,38 @@ describe("preview routes", () => {
     })
     expect(deleted.status).toBe(200)
     expect(app.store.getPreviewPort(session.id)).toBeNull()
+  })
+
+  it("keeps session creation working when the preview instruction is rejected", async () => {
+    upstream = await startMockOpencode()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const failingFetch: typeof fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+      if (url.includes("/instructions/entries/")) {
+        return Promise.resolve(new Response(null, { status: 500 }))
+      }
+      return fetch(input, init)
+    }
+
+    try {
+      app = await startTestApp({ config: { opencodeUrl: upstream.url }, fetchImpl: failingFetch })
+      const cookie = await login(app.url)
+
+      app.store.createWorkspace({ id: "ws", name: "ws", path: "/tmp/masterhand-workspaces/ws", createdAt: Date.now() })
+      const created = await fetch(`${app.url}/api/workspaces/ws/sessions`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      expect(created.status).toBe(201)
+      const { session } = (await created.json()) as { session: { id: string } }
+      // The port stays reserved even though the entry write failed; the agent
+      // just does not get the instruction until the preview is started.
+      expect(app.store.getPreviewPort(session.id)).toBe(32900)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("HTTP 500"))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

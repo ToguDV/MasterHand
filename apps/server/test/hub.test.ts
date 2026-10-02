@@ -133,4 +133,26 @@ describe("createEventHub", () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(fetchImpl).not.toHaveBeenCalled()
   })
+
+  it("is idempotent: repeated starts open a single connection loop", async () => {
+    let calls = 0
+    const fetchImpl = vi.fn(() => {
+      calls += 1
+      // A hanging request keeps the first loop busy, so only a duplicate loop
+      // would produce another call.
+      return new Promise<Response>(() => {})
+    })
+    hub = createEventHub({
+      url: "http://upstream/api/event",
+      reconnectBaseMs: 5,
+      reconnectMaxMs: 10,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    hub.start()
+    hub.start()
+    await waitFor(() => calls === 1)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(calls).toBe(1)
+  })
 })
