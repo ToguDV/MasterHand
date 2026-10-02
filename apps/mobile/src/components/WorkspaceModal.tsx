@@ -98,6 +98,7 @@ export function WorkspaceModal({
                 autoCorrect={false}
                 autoCapitalize="none"
                 style={styles.input}
+                testID="workspace-name-input"
               />
               {error ? <Text style={styles.error}>{error}</Text> : null}
               <View style={styles.formActions}>

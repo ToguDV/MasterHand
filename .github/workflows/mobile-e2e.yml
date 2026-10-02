@@ -1,0 +1,117 @@
+name: Mobile E2E
+
+# Drives the Expo app on an Android emulator with Maestro, against the mock
+# opencode + BFF harness. Deliberately manual-only (`workflow_dispatch`) until it
+# has been validated on a runner: it downloads a system image / Expo Go and boots
+# an emulator, which is slow and can be flaky. See docs/runbooks/mobile-e2e.md.
+#
+# Once a green run is confirmed, wire it to `pull_request` (and, optionally,
+# cache the Expo Go APK) instead of leaving it manual.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android emulator (Maestro)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MOCK_PORT: "4097"
+      BFF_PORT: "8788"
+      MASTERHAND_PASSWORD: e2e-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Start mock opencode and BFF
+        run: |
+          nohup env MOCK_PORT="$MOCK_PORT" npx tsx e2e/mock-opencode.ts > /tmp/mock.log 2>&1 &
+          nohup env \
+            PORT="$BFF_PORT" \
+            OPENCODE_URL="http://127.0.0.1:$MOCK_PORT" \
+            MASTERHAND_PASSWORD="$MASTERHAND_PASSWORD" \
+            SESSION_SECRET=e2e-secret \
+            COOKIE_SECURE=false \
+            DATA_DIR=/tmp/masterhand-e2e \
+            WORKSPACES_ROOT=/tmp/masterhand-e2e-workspace \
+            PREVIEW_ENABLED=false \
+            npx tsx apps/server/src/index.ts > /tmp/bff.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:$BFF_PORT/api/health" > /dev/null; then
+              echo "BFF is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "BFF did not become healthy"; cat /tmp/bff.log; exit 1
+
+      - name: Start Metro (Expo dev server)
+        working-directory: apps/mobile
+        run: |
+          nohup env CI=1 EXPO_NO_TELEMETRY=1 npx expo start --port 8081 --localhost > /tmp/metro.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:8081/status" > /dev/null; then
+              echo "Metro is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Metro did not become ready"; cat /tmp/metro.log; exit 1
+
+      - name: Run Maestro on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb reverse tcp:8081 tcp:8081
+            adb reverse tcp:8788 tcp:8788
+            # The top-level `androidClientUrl` is a stale legacy build; pick the
+            # Expo Go release that matches the app's SDK (from package.json).
+            SDK="$(node -p "require('./apps/mobile/package.json').dependencies.expo.replace(/[^0-9.]/g, '').split('.').slice(0, 2).join('.') + '.0'")"
+            APK_URL="$(curl -s https://api.expo.dev/v2/versions/latest | jq -r --arg sdk "$SDK" '.data.sdkVersions[$sdk].androidClientUrl // .data.androidClientUrl')"
+            echo "Expo Go for SDK $SDK: $APK_URL"
+            curl -sL -o /tmp/expo-go.apk "$APK_URL"
+            adb install -r /tmp/expo-go.apk
+            maestro test apps/mobile/.maestro/chat.yaml \
+              -e MAESTRO_APP_URL=exp://127.0.0.1:8081 \
+              -e MASTERHAND_URL=http://127.0.0.1:8788 \
+              -e MASTERHAND_PASSWORD="$MASTERHAND_PASSWORD"
+
+      - name: Upload logs and screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-artifacts
+          path: |
+            /tmp/mock.log
+            /tmp/bff.log
+            /tmp/metro.log
+            ~/.maestro/tests
+          retention-days: 7
+          if-no-files-found: ignore

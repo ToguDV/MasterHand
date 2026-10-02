@@ -1,0 +1,85 @@
+# Mobile E2E happy path: sign in with the device flow, add a workspace, create a
+# session, send a prompt, approve the permission the mock requests and see the
+# reply. Runs against the mock opencode + BFF harness (see
+# docs/runbooks/mobile-e2e.md); the app is loaded in Expo Go.
+#
+# Env vars (all required):
+#   MAESTRO_APP_URL       exp:// URL of the Metro dev server (e.g. exp://127.0.0.1:8081)
+#   MASTERHAND_URL        BFF base URL the app signs in to (e.g. http://127.0.0.1:8788)
+#   MASTERHAND_PASSWORD   BFF password (MASTERHAND_PASSWORD)
+appId: host.exp.exponent
+---
+- openLink: ${MAESTRO_APP_URL}
+
+# Expo Go's first launch shows a developer-menu onboarding ("Continue") and then
+# the dev menu itself ("Close"); dismiss whichever appears before the app UI.
+- extendedWaitUntil:
+    visible: "MasterHand"
+    timeout: 90000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Close"
+    commands:
+      - tapOn: "Close"
+
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 30000
+
+# eraseText: the URL field can be prefilled from a previous run's SecureStore.
+- tapOn:
+    id: "server-url-input"
+- eraseText
+- inputText: ${MASTERHAND_URL}
+- tapOn:
+    id: "password-input"
+- eraseText
+- inputText: ${MASTERHAND_PASSWORD}
+- tapOn: "Sign in"
+
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+
+# A fresh harness has no workspace, so create one from the bottom sheet. Reused
+# local runs keep theirs, so the whole step is conditional (idempotent flow).
+- runFlow:
+    when:
+      visible: "Add a workspace"
+    commands:
+      - tapOn: "Add a workspace"
+      - tapOn: "Add workspace"
+      - tapOn:
+          id: "workspace-name-input"
+      - inputText: "demo"
+      - tapOn: "Add"
+      # The sheet stays open after a successful add; dismiss it on the backdrop.
+      - tapOn:
+          point: "50%,8%"
+
+- tapOn:
+    id: "new-session-button"
+- extendedWaitUntil:
+    visible: "Write a message…"
+    timeout: 20000
+
+- tapOn:
+    id: "composer-input"
+- inputText: "hello"
+- tapOn: "Send"
+
+# The mock streams "Working…" and then asks for a permission, which covers that
+# text; wait for the modal directly.
+- extendedWaitUntil:
+    visible: "(?i)permission required"
+    timeout: 20000
+- tapOn: "Once"
+
+- extendedWaitUntil:
+    visible: "Done!"
+    timeout: 20000

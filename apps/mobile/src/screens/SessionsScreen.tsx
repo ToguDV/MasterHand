@@ -91,6 +91,7 @@ export function SessionsScreen({
           <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.warning }]} />
           <Pressable
             style={[styles.newButton, !canCreate && styles.disabled]}
+            testID="new-session-button"
             onPress={() => onNew(isolated)}
             disabled={creating || !canCreate}
           >

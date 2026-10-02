@@ -196,6 +196,7 @@ export function Composer({
           placeholder="Write a message…"
           placeholderTextColor={colors.muted}
           multiline
+          testID="composer-input"
         />
         {busy ? (
           <Pressable style={[styles.action, styles.stop]} onPress={() => void stop()}>

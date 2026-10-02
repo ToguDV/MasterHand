@@ -28,6 +28,7 @@ export function LoginScreen({
         <Text style={styles.label}>Server URL</Text>
         <TextInput
           style={styles.input}
+          testID="server-url-input"
           value={serverUrl}
           onChangeText={setServerUrl}
           placeholder="https://masterhand.example.com"
@@ -41,6 +42,7 @@ export function LoginScreen({
         <Text style={styles.label}>Password</Text>
         <TextInput
           style={styles.input}
+          testID="password-input"
           value={password}
           onChangeText={setPassword}
           placeholder="••••••••"
