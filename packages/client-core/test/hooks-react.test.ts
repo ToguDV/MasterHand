@@ -271,4 +271,20 @@ describe("useEventStream", () => {
     expect(stream.forceReconnect).toHaveBeenCalledTimes(2)
     expect(stream.stop).toHaveBeenCalledTimes(1)
   })
+
+  it("returns a handle that forces a reconnect while mounted", async () => {
+    const qc = newQueryClient()
+    const { client, stream } = makeClient()
+    const view = renderHook(() => useEventStream(client, { enabled: true, onEvent: () => {} }), {
+      wrapper: wrapper(qc),
+    })
+    await waitFor(() => expect(stream.start).toHaveBeenCalledTimes(1))
+
+    view.result.current()
+    expect(stream.forceReconnect).toHaveBeenCalledTimes(1)
+
+    view.unmount()
+    view.result.current()
+    expect(stream.forceReconnect).toHaveBeenCalledTimes(1)
+  })
 })
