@@ -3,6 +3,12 @@
 How to drive the Expo app (`apps/mobile`) end to end on an Android emulator or an
 iOS simulator with [Maestro](https://maestro.mobile.dev), and how it runs in CI.
 
+> **Decision (ADR-17): this suite runs only in CI.** The emulator + Android SDK
+> (~5 GB) is not installed on developer machines; you do not need it. Local
+> development relies on the `jest-expo` render suite (`npm test -w
+> @masterhand/mobile`) and the `dev:mobile` stack. The local steps below are for
+> debugging the CI job or for a one-off native check, not part of the daily loop.
+
 The flows live in `apps/mobile/.maestro/` and talk to the **mock opencode + real
 BFF** harness (the same two processes the web Playwright suite uses,
 `e2e/mock-opencode.ts` and `apps/server/src/index.ts`). The app is loaded in
