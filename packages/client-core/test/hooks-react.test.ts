@@ -265,6 +265,10 @@ describe("useEventStream", () => {
     expect(stream.forceReconnect).toHaveBeenCalledTimes(2)
 
     view.unmount()
+    // The listeners are detached with the stream, so late events are ignored.
+    document.dispatchEvent(new Event("visibilitychange"))
+    window.dispatchEvent(new Event("online"))
+    expect(stream.forceReconnect).toHaveBeenCalledTimes(2)
     expect(stream.stop).toHaveBeenCalledTimes(1)
   })
 })

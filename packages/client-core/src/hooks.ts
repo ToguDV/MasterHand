@@ -503,6 +503,56 @@ export interface UseEventStreamOptions {
   onConnect?: () => void
 }
 
+/** Minimal surface `attachReconnectListeners` needs from a stream. */
+interface ReconnectableStream {
+  forceReconnect(): void
+}
+
+/** The listener pair a DOM target must expose to be wired (and unwired). */
+interface EventListenerTarget {
+  addEventListener(type: string, listener: () => void): void
+  removeEventListener(type: string, listener: () => void): void
+}
+
+/**
+ * Returns `value` only when it is a usable DOM listener target. React Native
+ * defines a global `window` that is not one, and has no `document` at all.
+ */
+function listenerTarget<T>(value: T | null): (T & EventListenerTarget) | null {
+  if (value === null) return null
+  const target = value as unknown as Partial<EventListenerTarget>
+  const usable =
+    typeof target.addEventListener === "function" && typeof target.removeEventListener === "function"
+  return usable ? (value as T & EventListenerTarget) : null
+}
+
+/**
+ * Web-only reconnection triggers: `visibilitychange` and `online`.
+ *
+ * React Native also defines a global `window`, but without the DOM listener
+ * API (and no `document` at all), so each target is feature-detected instead of
+ * assumed. Native does not need them: the stream reconnects on its own with
+ * backoff, and the app reconciles state when it returns to the foreground.
+ * Returns the cleanup. Exported for tests.
+ */
+export function attachReconnectListeners(stream: ReconnectableStream): () => void {
+  const doc = listenerTarget(typeof document === "undefined" ? null : document)
+  const win = listenerTarget(typeof window === "undefined" ? null : window)
+
+  const handleVisibility = (): void => {
+    if (doc?.visibilityState === "visible") stream.forceReconnect()
+  }
+  const handleOnline = (): void => stream.forceReconnect()
+
+  doc?.addEventListener("visibilitychange", handleVisibility)
+  win?.addEventListener("online", handleOnline)
+
+  return () => {
+    doc?.removeEventListener("visibilitychange", handleVisibility)
+    win?.removeEventListener("online", handleOnline)
+  }
+}
+
 /** Reconnecting SSE subscription that also reacts to tab visibility and network changes on web. */
 export function useEventStream(client: Client, options: UseEventStreamOptions): void {
   const onEventRef = useRef(options.onEvent)
@@ -522,19 +572,11 @@ export function useEventStream(client: Client, options: UseEventStreamOptions): 
     })
     stream.start()
 
-    const doc = typeof document === "undefined" ? null : document
-    const win = typeof window === "undefined" ? null : window
-    const handleVisibility = (): void => {
-      if (doc?.visibilityState === "visible") stream.forceReconnect()
-    }
-    const handleOnline = (): void => stream.forceReconnect()
-
-    doc?.addEventListener("visibilitychange", handleVisibility)
-    win?.addEventListener("online", handleOnline)
+    // Web only: React Native has no DOM globals to listen to.
+    const detachReconnectListeners = attachReconnectListeners(stream)
 
     return () => {
-      doc?.removeEventListener("visibilitychange", handleVisibility)
-      win?.removeEventListener("online", handleOnline)
+      detachReconnectListeners()
       stream.stop()
     }
   }, [client, options.enabled])

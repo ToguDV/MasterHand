@@ -50,13 +50,14 @@ npm run e2e:browsers     # downloads the Chromium used by Playwright
 
 ## Unit tests
 
-- Locations: `apps/server/test` and `packages/client-core/test` (vitest).
+- Locations: `apps/server/test`, `packages/client-core/test` and `apps/mobile/test` (vitest).
 - Run all: `npm test`. Watch a workspace: `npm run test:watch -w @masterhand/server`.
 
 ## Coverage gate
 
 - Run: `npm run test:coverage` (vitest v8, `lcov` + `text`).
 - Enforced with an **80% threshold** on lines, statements, branches and functions in `apps/server` and `packages/client-core` (the two libraries with tests). `apps/web`, `mobile`, `desktop` and `e2e` are out of scope: their UI/flows are validated by E2E, not by a percentage.
+- `apps/mobile` still runs its (small) suite in the same gate — `test:coverage` maps to `vitest run`, with no threshold — because native-only defects (DOM-absence crashes, deprecated React Native APIs) cannot be reached by the browser E2E suite.
 - Entry points (`src/index.ts`) and type-only modules (`src/types.ts`) are excluded; there is no other exclusion.
 - React hooks in `client-core` are tested with `@testing-library/react` (`renderHook`) under a jsdom environment; the rest of that package is plain Node.
 - CI and the git hooks fail when a threshold is not met; the `lcov` report is uploaded as an artifact on failure.
