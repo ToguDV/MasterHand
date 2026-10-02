@@ -121,4 +121,12 @@ describe("storage — session preferences", () => {
 
     expect(await loadSessionPreferences("s1")).toEqual({})
   })
+
+  it("starts a fresh map when the stored one is corrupted", async () => {
+    await SecureStore.setItemAsync("masterhand.sessionPreferences", "{not json")
+
+    await saveSessionPreferences("s1", { agent: "build", model: "test-model", variant: "low" })
+
+    expect(await loadSessionPreferences("s1")).toEqual({ agent: "build", model: "test-model", variant: "low" })
+  })
 })

@@ -110,4 +110,30 @@ describe("PreviewModal", () => {
 
     expect(onClose).toHaveBeenCalled()
   })
+
+  it("reports a failed stop", async () => {
+    const client = fakeClient()
+    client.auth.status.mockResolvedValue({ ok: true, preview: enabled })
+    client.api.preview.mockResolvedValue({
+      status: "running",
+      url: "https://abc.trycloudflare.com",
+      port: 3000,
+      error: null,
+    })
+    client.api.stopPreview.mockRejectedValue(new Error("nope"))
+    await setup(client)
+
+    await fireEvent.press(await screen.findByText("Stop"))
+
+    expect(await screen.findByText("Could not stop the preview")).toBeOnTheScreen()
+  })
+
+  it("shows the starting placeholder while the tunnel boots", async () => {
+    const client = fakeClient()
+    client.auth.status.mockResolvedValue({ ok: true, preview: enabled })
+    client.api.preview.mockResolvedValue({ status: "starting", url: null, port: 3000, error: null })
+    await setup(client)
+
+    expect(await screen.findByText("Starting the tunnel…")).toBeOnTheScreen()
+  })
 })

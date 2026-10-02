@@ -41,7 +41,7 @@ import {
   saveWorkspaceID,
 } from "./src/storage"
 
-const queryClient = new QueryClient({
+export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,

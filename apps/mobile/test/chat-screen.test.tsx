@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react-native"
-import type { ChatMessage } from "@masterhand/client-core"
+import { Linking } from "react-native"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native"
+import type { ChatMessage, SessionIsolation } from "@masterhand/client-core"
 import { ChatScreen } from "../src/screens/ChatScreen"
 import { fakeClient, makeQueryClient, QueryWrapper } from "./support/render"
 
@@ -116,5 +117,80 @@ describe("ChatScreen", () => {
     await fireEvent.press(await screen.findByText("Preview"))
 
     expect(client.api.preview).toHaveBeenCalledWith("s1")
+  })
+
+  const isolation: SessionIsolation = {
+    isolated: true,
+    worktreePath: "/workspaces/.worktrees/demo/abc",
+    branch: "masterhand/abc",
+    baseRef: "HEAD",
+  }
+
+  it("reports a failed finish", async () => {
+    const { client } = await setup({ isolation })
+    client.api.sessions.finish.mockRejectedValue(new Error("nope"))
+
+    await fireEvent.press(await screen.findByText("Finish & PR"))
+
+    expect(await screen.findByText("Could not finish the session")).toBeOnTheScreen()
+  })
+
+  it("shows the error returned by the finish endpoint", async () => {
+    const { client } = await setup({ isolation })
+    client.api.sessions.finish.mockResolvedValue({
+      committed: false,
+      pushed: false,
+      prUrl: null,
+      branch: "masterhand/abc",
+      path: "/workspaces/.worktrees/demo/abc",
+      error: "merge conflict",
+    })
+
+    await fireEvent.press(await screen.findByText("Finish & PR"))
+
+    expect(await screen.findByText("merge conflict")).toBeOnTheScreen()
+  })
+
+  it("opens the pull request produced by a finish", async () => {
+    const open = jest.spyOn(Linking, "openURL").mockResolvedValue(true)
+    const { client } = await setup({ isolation })
+    client.api.sessions.finish.mockResolvedValue({
+      committed: false,
+      pushed: true,
+      prUrl: "https://github.com/ToguDV/masterhand/pull/99",
+      branch: "masterhand/abc",
+      path: "/workspaces/.worktrees/demo/abc",
+      error: null,
+    })
+
+    await fireEvent.press(await screen.findByText("Finish & PR"))
+    await fireEvent.press(await screen.findByText("Open pull request ↗"))
+
+    expect(open).toHaveBeenCalledWith("https://github.com/ToguDV/masterhand/pull/99")
+    open.mockRestore()
+  })
+
+  it("opens the isolation pull request link from the header bar", async () => {
+    const open = jest.spyOn(Linking, "openURL").mockResolvedValue(true)
+    await setup({ isolation: { ...isolation, prUrl: "https://github.com/ToguDV/masterhand/pull/7" } })
+
+    await fireEvent.press(await screen.findByText("PR ↗"))
+
+    expect(open).toHaveBeenCalledWith("https://github.com/ToguDV/masterhand/pull/7")
+    open.mockRestore()
+  })
+
+  it("closes the preview modal", async () => {
+    await setup({}, (client) => {
+      client.auth.status.mockResolvedValue({
+        ok: true,
+        preview: { enabled: true, available: true, portRange: { min: 3000, max: 3010 } },
+      })
+    })
+
+    await fireEvent.press(await screen.findByText("Preview"))
+    await fireEvent.press(await screen.findByText("Close"))
+
+    await waitFor(() => expect(screen.queryByText("Start")).toBeNull())
   })
 })

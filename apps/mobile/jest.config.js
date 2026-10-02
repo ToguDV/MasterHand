@@ -16,6 +16,6 @@ module.exports = {
   collectCoverageFrom: ["src/**/*.{ts,tsx}", "App.tsx", "!src/theme.ts"],
   // A floor for the render suite (root `test:coverage` runs with --coverage).
   coverageThreshold: {
-    global: { statements: 65, branches: 65, functions: 65, lines: 65 },
+    global: { statements: 90, branches: 80, functions: 88, lines: 92 },
   },
 }
