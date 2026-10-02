@@ -384,27 +384,76 @@ export function tokenCounts(tokens?: TokenUsageInfo): TokenCounts {
   }
 }
 
+const COUNT_UNITS: ReadonlyArray<readonly [number, string]> = [
+  [1_000_000_000, "b"],
+  [1_000_000, "m"],
+  [1_000, "k"],
+]
+
+/** Rounds to one decimal and drops a trailing `.0` (`1500` -> `"1.5"`, `1000` -> `"1"`). */
+function formatRounded(value: number): string {
+  const rounded = Math.round(value * 10) / 10
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+}
+
+/** Abbreviates a count: `1000` -> `"1k"`, `1_500_000` -> `"1.5m"`. */
+export function formatCount(value: number): string {
+  if (!Number.isFinite(value)) return "0"
+  const abs = Math.abs(value)
+  for (let index = 0; index < COUNT_UNITS.length; index++) {
+    const unit = COUNT_UNITS[index]
+    if (!unit || abs < unit[0]) continue
+    const [size, suffix] = unit
+    // 999_999 would round to "1000k"; promote to the next unit instead.
+    if (Math.abs(Math.round((value / size) * 10) / 10) >= 1000) {
+      const next = COUNT_UNITS[index - 1]
+      if (next) return `${formatRounded(value / next[0])}${next[1]}`
+    }
+    return `${formatRounded(value / size)}${suffix}`
+  }
+  return String(value)
+}
+
 /**
  * Human-readable token breakdown, skipping zero categories. Returns an empty
  * string when there is no usage, so callers can render it conditionally.
  */
 export function formatTokens(counts: TokenCounts): string {
   const parts: string[] = []
-  if (counts.input > 0) parts.push(`${counts.input} input`)
-  if (counts.output > 0) parts.push(`${counts.output} output`)
-  if (counts.reasoning > 0) parts.push(`${counts.reasoning} reasoning`)
-  if (counts.cacheRead > 0) parts.push(`${counts.cacheRead} cache read`)
-  if (counts.cacheWrite > 0) parts.push(`${counts.cacheWrite} cache write`)
+  if (counts.input > 0) parts.push(`${formatCount(counts.input)} input`)
+  if (counts.output > 0) parts.push(`${formatCount(counts.output)} output`)
+  if (counts.reasoning > 0) parts.push(`${formatCount(counts.reasoning)} reasoning`)
+  if (counts.cacheRead > 0) parts.push(`${formatCount(counts.cacheRead)} cache read`)
+  if (counts.cacheWrite > 0) parts.push(`${formatCount(counts.cacheWrite)} cache write`)
   return parts.join(" · ")
+}
+
+/**
+ * Generated tokens per second for a step. Uses the provider's generated tokens
+ * (`output` excludes `reasoning`, so both are added) over the step duration.
+ * Returns `null` when it cannot be computed (no tokens or no duration).
+ */
+export function tokenSpeed(counts: TokenCounts, durationMs: number): number | null {
+  const generated = counts.output + counts.reasoning
+  if (generated <= 0 || durationMs <= 0) return null
+  return generated / (durationMs / 1000)
+}
+
+/** Formats a speed as `"12.3 tok/s"` (empty string when `null`). */
+export function formatSpeed(speed: number | null): string {
+  return speed === null ? "" : `${formatRounded(speed)} tok/s`
 }
 
 export interface SessionUsage extends TokenCounts {
   /** Total cost reported by opencode (already includes input, output and cache). */
   cost: number
+  /** Summed model time of the completed assistant steps, in milliseconds. */
+  durationMs: number
 }
 
 export function sessionUsage(messages: ChatMessage[]): SessionUsage {
   let cost = 0
+  let durationMs = 0
   const totals: TokenCounts = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
   for (const message of messages) {
     if (message.info.role !== "assistant") continue
@@ -415,8 +464,10 @@ export function sessionUsage(messages: ChatMessage[]): SessionUsage {
     totals.reasoning += counts.reasoning
     totals.cacheRead += counts.cacheRead
     totals.cacheWrite += counts.cacheWrite
+    const { created, completed } = message.info.time
+    if (completed !== undefined && completed > created) durationMs += completed - created
   }
-  return { cost, ...totals }
+  return { cost, durationMs, ...totals }
 }
 
 export function toolTitle(part: ChatToolPart): string {

@@ -2,8 +2,10 @@ import { useRef, useState } from "react"
 import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native"
 import { useQueryClient } from "@tanstack/react-query"
 import {
+  formatSpeed,
   formatTokens,
   sessionUsage,
+  tokenSpeed,
   useBffStatus,
   useMessages,
   type ChatMessage,
@@ -55,6 +57,7 @@ export function ChatScreen({
   const messages = messagesQuery.data ?? []
   const usage = sessionUsage(messages)
   const tokenBreakdown = formatTokens(usage)
+  const speed = formatSpeed(tokenSpeed(usage, usage.durationMs))
 
   async function finish() {
     setFinishing(true)
@@ -109,6 +112,7 @@ export function ChatScreen({
         <Text style={styles.usage}>
           Session · ${usage.cost.toFixed(4)}
           {tokenBreakdown ? ` · ${tokenBreakdown}` : ""}
+          {speed ? ` · ${speed}` : ""}
         </Text>
       ) : null}
 

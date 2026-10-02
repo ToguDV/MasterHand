@@ -9,7 +9,7 @@ const assistant: ChatMessage = {
     id: "a1",
     sessionID: "s1",
     role: "assistant",
-    time: { created: 1, completed: 2 },
+    time: { created: 1000, completed: 2000 },
     modelID: "test-model",
     cost: 0.001,
     tokens: { input: 20, output: 5 } as ChatMessage["info"]["tokens"],
@@ -53,7 +53,7 @@ describe("ChatScreen", () => {
 
     expect(await screen.findByText("reply from agent")).toBeOnTheScreen()
     expect(screen.getByText("My session")).toBeOnTheScreen()
-    expect(screen.getByText("Session · $0.0010 · 20 input · 5 output")).toBeOnTheScreen()
+    expect(screen.getByText("Session · $0.0010 · 20 input · 5 output · 5 tok/s")).toBeOnTheScreen()
   })
 
   it("prompts to start when there are no messages", async () => {

@@ -6,7 +6,9 @@ export { parseSseStream, type SseMessage } from "./sse"
 export {
   appendDelta,
   directoryName,
+  formatCount,
   formatRelative,
+  formatSpeed,
   formatTokens,
   isTaskTool,
   makeToolPart,
@@ -18,6 +20,7 @@ export {
   subagentOutput,
   toChatMessage,
   tokenCounts,
+  tokenSpeed,
   toolTitle,
   updateToolPart,
   upsertToolPart,
