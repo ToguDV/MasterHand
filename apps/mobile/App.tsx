@@ -284,7 +284,7 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
     void syncPermissions()
   }, [syncPermissions])
 
-  useEventStream(client, {
+  const forceReconnect = useEventStream(client, {
     enabled: true,
     onEvent: handleEvent,
     onConnectionChange: setConnected,
@@ -298,10 +298,14 @@ function AuthenticatedApp({ client, onSignOut }: { client: Client; onSignOut: ()
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") syncPermissions()
+      if (state !== "active") return
+      // The socket usually dies while the app is suspended (and the reconnect
+      // ladder may have grown meanwhile): reconnect now instead of waiting.
+      forceReconnect()
+      syncPermissions()
     })
     return () => subscription.remove()
-  }, [syncPermissions])
+  }, [forceReconnect, syncPermissions])
 
   // Drain the queue for sessions with auto-accept on. This also covers pending
   // requests recovered on reconnect/reload (they never arrive as events).

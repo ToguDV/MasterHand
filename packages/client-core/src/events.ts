@@ -104,6 +104,17 @@ export function createEventStream(options: EventStreamOptions): EventStream {
       watchdogTimer = null
     },
     forceReconnect() {
+      if (stopped) return
+      // A deliberate signal (tab visible again, network back, app foregrounded):
+      // retry at full speed instead of waiting out the current backoff, and
+      // cancel a retry already scheduled with the grown delay.
+      backoff = reconnectBaseMs
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+        void connect()
+        return
+      }
       controller?.abort()
     },
     get connected() {

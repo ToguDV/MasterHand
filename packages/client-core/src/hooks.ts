@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import type { Client } from "./client"
 import {
@@ -531,8 +531,8 @@ function listenerTarget<T>(value: T | null): (T & EventListenerTarget) | null {
  *
  * React Native also defines a global `window`, but without the DOM listener
  * API (and no `document` at all), so each target is feature-detected instead of
- * assumed. Native does not need them: the stream reconnects on its own with
- * backoff, and the app reconciles state when it returns to the foreground.
+ * assumed. Native does not need them: it drives the same reconnect through
+ * `useEventStream`'s returned handle when the app returns to the foreground.
  * Returns the cleanup. Exported for tests.
  */
 export function attachReconnectListeners(stream: ReconnectableStream): () => void {
@@ -553,14 +553,22 @@ export function attachReconnectListeners(stream: ReconnectableStream): () => voi
   }
 }
 
-/** Reconnecting SSE subscription that also reacts to tab visibility and network changes on web. */
-export function useEventStream(client: Client, options: UseEventStreamOptions): void {
+/**
+ * Reconnecting SSE subscription that also reacts to tab visibility and network
+ * changes on web.
+ *
+ * Returns a stable `forceReconnect` handle for signals the stream cannot see by
+ * itself — React Native has no DOM events, so the app calls it when it returns
+ * to the foreground.
+ */
+export function useEventStream(client: Client, options: UseEventStreamOptions): () => void {
   const onEventRef = useRef(options.onEvent)
   onEventRef.current = options.onEvent
   const onConnectionRef = useRef(options.onConnectionChange)
   onConnectionRef.current = options.onConnectionChange
   const onConnectRef = useRef(options.onConnect)
   onConnectRef.current = options.onConnect
+  const streamRef = useRef<ReconnectableStream | null>(null)
 
   useEffect(() => {
     if (!options.enabled) return
@@ -574,10 +582,14 @@ export function useEventStream(client: Client, options: UseEventStreamOptions): 
 
     // Web only: React Native has no DOM globals to listen to.
     const detachReconnectListeners = attachReconnectListeners(stream)
+    streamRef.current = stream
 
     return () => {
+      streamRef.current = null
       detachReconnectListeners()
       stream.stop()
     }
   }, [client, options.enabled])
+
+  return useCallback(() => streamRef.current?.forceReconnect(), [])
 }

@@ -1,12 +1,19 @@
 /**
  * Static guards for the mobile app.
  *
- * React Native removes deprecated APIs in later releases, so a source-level
- * check keeps them out: `SafeAreaView` from `react-native` already logs a
- * deprecation warning, and `react-native-safe-area-context` is the supported
- * replacement — which only works with its provider mounted at the app root,
- * otherwise every inset silently reads as zero and the UI slides under the
- * status bar.
+ * These defects only show up on a device or in Expo Go — the browser E2E suite
+ * and the coverage gate cannot reach them — so the source-level checks below
+ * keep them from creeping back in:
+ *
+ * - React Native removes deprecated APIs in later releases, so `SafeAreaView`
+ *   (and friends) must not be imported from `react-native`.
+ * - `react-native-safe-area-context` only works with its provider mounted, and
+ *   the bottom inset has to be dropped while the keyboard is up.
+ * - Since edge-to-edge became mandatory on Android (Expo SDK 54 / RN 0.86) the
+ *   window no longer resizes for the keyboard, so the screen shell must keep a
+ *   `KeyboardAvoidingView` or the composer ends up behind the IME.
+ * - Native has no DOM events: the app must reconnect the stream itself when it
+ *   returns to the foreground.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, join, relative } from "node:path"
@@ -14,6 +21,10 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
+
+function read(relativePath: string): string {
+  return readFileSync(join(appRoot, relativePath), "utf8")
+}
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -66,20 +77,43 @@ describe("react-native APIs", () => {
   })
 
   it("keeps SafeAreaProvider mounted at the app root", () => {
-    const app = readFileSync(join(appRoot, "App.tsx"), "utf8")
+    const app = read("App.tsx")
     expect(app).toContain("<SafeAreaProvider>")
     expect(app).toContain("</SafeAreaProvider>")
   })
 
   it("uses the safe-area-context SafeAreaView in Screen", () => {
-    const screen = readFileSync(join(appRoot, "src/components/Screen.tsx"), "utf8")
-    expect(importedNames(screen, "react-native-safe-area-context")).toContain("SafeAreaView")
+    expect(importedNames(read("src/components/Screen.tsx"), "react-native-safe-area-context")).toContain(
+      "SafeAreaView",
+    )
   })
 
   it("declares react-native-safe-area-context as a dependency", () => {
-    const pkg = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8")) as {
-      dependencies?: Record<string, string>
-    }
+    const pkg = JSON.parse(read("package.json")) as { dependencies?: Record<string, string> }
     expect(pkg.dependencies?.["react-native-safe-area-context"]).toBeTruthy()
+  })
+})
+
+describe("keyboard handling", () => {
+  it("keeps the keyboard from covering bottom-pinned inputs", () => {
+    const screen = read("src/components/Screen.tsx")
+    expect(importedNames(screen, "react-native")).toContain("KeyboardAvoidingView")
+    expect(screen).toMatch(/behavior="padding"/)
+  })
+
+  it("drops the bottom safe-area inset while the keyboard is up", () => {
+    const screen = read("src/components/Screen.tsx")
+    // The insets are conditional on the keyboard: the keyboard already covers
+    // the navigation-bar strip, so keeping the inset would float the input.
+    expect(screen).toMatch(/edges=\{[^}]*keyboardVisible/)
+    expect(screen).toMatch(/keyboardDidShow|keyboardWillShow/)
+  })
+})
+
+describe("foreground recovery", () => {
+  it("reconnects the event stream when the app becomes active again", () => {
+    const app = read("App.tsx")
+    expect(app).toMatch(/AppState\.addEventListener\(\s*"change"/)
+    expect(app).toMatch(/forceReconnect\(\)/)
   })
 })

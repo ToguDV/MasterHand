@@ -737,6 +737,37 @@ describe("event stream resilience", () => {
     expect(calls).toBe(callsAfterStop)
   })
 
+  it("forceReconnect retries now instead of waiting out the grown backoff", async () => {
+    let calls = 0
+    // A permanently failing upstream grows the ladder: retries at 50, 100, 200…
+    const fetchImpl = (async () => {
+      calls++
+      return new Response(null, { status: 502 })
+    }) as typeof fetch
+
+    const stream = createEventStream({
+      baseUrl: "https://mh.example",
+      fetchImpl,
+      reconnectBaseMs: 50,
+      reconnectMaxMs: 10_000,
+      onEvent: () => {},
+    })
+    stream.start()
+    // After ~260ms three attempts happened and the next one is ~90ms away.
+    await new Promise((resolve) => setTimeout(resolve, 260))
+    const before = calls
+    stream.forceReconnect()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(calls).toBe(before + 1)
+
+    // Once stopped the handle is inert (no zombie fetch).
+    stream.stop()
+    const afterStop = calls
+    stream.forceReconnect()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(calls).toBe(afterStop)
+  })
+
   it("aborts a stale connection through the watchdog", async () => {
     const states: boolean[] = []
     const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
