@@ -14,16 +14,10 @@ import {
   appendDelta,
   directoryName,
   formatRelative,
-  hasVisibleParts,
-  isStreaming,
   isTaskTool,
   makeToolPart,
   mergeLiveMessages,
-  messageText,
-  partsFromContent,
   placeholderAssistant,
-  removeMessage,
-  replaceParts,
   sessionUsage,
   setMessageCost,
   setStreamText,
@@ -33,7 +27,6 @@ import {
   toChatMessage,
   toolTitle,
   updateToolPart,
-  upsertMessage,
   upsertToolPart,
 } from "../src/chat"
 
@@ -286,44 +279,47 @@ describe("toChatMessage", () => {
   })
 })
 
-describe("partsFromContent", () => {
+describe("content projection", () => {
   it("projects text, reasoning and tool parts with per-kind ordinal ids", () => {
-    const parts = partsFromContent(
-      [
-        { type: "text", text: "hello" },
-        { type: "reasoning", text: "think" },
-        { type: "tool", id: "t1", name: "bash", state: { status: "running", input: {}, metadata: {} } },
-      ],
+    const message = toChatMessage(
+      assistantMessage({
+        content: [
+          { type: "text", text: "hello" },
+          { type: "reasoning", text: "think" },
+          toolMessage("t1", "bash", { status: "running", input: {}, metadata: {} }),
+        ],
+      }),
       SESSION,
-      "msg_1",
     )
+    const parts = message?.parts ?? []
 
     expect(parts.map((part) => [part.id, part.type])).toEqual([
-      ["msg_1:text:0", "text"],
-      ["msg_1:reasoning:0", "reasoning"],
+      ["msg_a:text:0", "text"],
+      ["msg_a:reasoning:0", "reasoning"],
       ["t1", "tool"],
     ])
-    expect(parts[0]).toEqual({ id: "msg_1:text:0", sessionID: SESSION, messageID: "msg_1", type: "text", text: "hello" })
+    expect(parts[0]).toEqual({ id: "msg_a:text:0", sessionID: SESSION, messageID: "msg_a", type: "text", text: "hello" })
     expect(parts[2]).toMatchObject({ type: "tool", tool: "bash", callID: "t1" })
   })
 
   it("numbers repeated parts of the same kind with the streaming scheme", () => {
-    const parts = partsFromContent(
-      [
-        { type: "text", text: "first" },
-        { type: "tool", id: "t1", name: "bash", state: { status: "running", input: {}, metadata: {} } },
-        { type: "text", text: "second" },
-        { type: "reasoning", text: "why" },
-      ],
+    const message = toChatMessage(
+      assistantMessage({
+        content: [
+          { type: "text", text: "first" },
+          toolMessage("t1", "bash", { status: "running", input: {}, metadata: {} }),
+          { type: "text", text: "second" },
+          { type: "reasoning", text: "why" },
+        ],
+      }),
       SESSION,
-      "msg_1",
     )
 
-    expect(parts.map((part) => part.id)).toEqual(["msg_1:text:0", "t1", "msg_1:text:1", "msg_1:reasoning:0"])
+    expect(message?.parts.map((part) => part.id)).toEqual(["msg_a:text:0", "t1", "msg_a:text:1", "msg_a:reasoning:0"])
   })
 
-  it("returns an empty list for empty content", () => {
-    expect(partsFromContent([], SESSION, "msg_1")).toEqual([])
+  it("returns no parts for empty content", () => {
+    expect(toChatMessage(assistantMessage(), SESSION)?.parts).toEqual([])
   })
 })
 
@@ -333,23 +329,6 @@ describe("message list helpers", () => {
       info: { id: "msg_new", sessionID: SESSION, role: "assistant", time: { created: 42 } },
       parts: [],
     })
-  })
-
-  it("appends messages and updates existing ones without duplicating", () => {
-    let list: ChatMessage[] = []
-    list = upsertMessage(list, chatMessage("msg_1"))
-    list = upsertMessage(list, chatMessage("msg_2"))
-    expect(list.map((message) => message.info.id)).toEqual(["msg_1", "msg_2"])
-
-    const updated = chatMessage("msg_1", [textPart("p", "new")])
-    list = upsertMessage(list, updated)
-    expect(list).toHaveLength(2)
-    expect(list[0]?.parts).toHaveLength(1)
-  })
-
-  it("removes messages by id", () => {
-    const list = [chatMessage("msg_1"), chatMessage("msg_2")]
-    expect(removeMessage(list, "msg_1").map((message) => message.info.id)).toEqual(["msg_2"])
   })
 })
 
@@ -520,16 +499,6 @@ describe("tool reducers", () => {
       toolPart("call_9", { status: "running", input: {} }, "detected"),
     )
   })
-
-  it("replaces a full parts snapshot and creates the message when missing", () => {
-    const list = [chatMessage("msg_1", [textPart("old", "old")])]
-    const replaced = replaceParts(list, SESSION, "msg_1", [textPart("new", "new")])
-    expect(replaced[0]?.parts).toEqual([textPart("new", "new")])
-
-    const created = replaceParts([], SESSION, "msg_new", [textPart("p", "x")])
-    expect(created[0]?.info.id).toBe("msg_new")
-    expect(created[0]?.parts).toHaveLength(1)
-  })
 })
 
 describe("setMessageCost", () => {
@@ -580,29 +549,6 @@ describe("sessionUsage", () => {
 })
 
 describe("message helpers", () => {
-  it("joins the text of text parts only", () => {
-    const message = chatMessage("msg_1", [
-      textPart("p1", "hello"),
-      toolPart("p2", { status: "pending", input: {} }),
-      { id: "p3", sessionID: SESSION, messageID: "msg_1", type: "reasoning", text: "ignored" },
-      textPart("p4", "world"),
-    ])
-    expect(messageText(message)).toBe("hello\nworld")
-  })
-
-  it("detects a streaming assistant message", () => {
-    expect(isStreaming(chatMessage("msg_1"))).toBe(true)
-    const done = chatMessage("msg_1")
-    done.info.time.completed = 5
-    expect(isStreaming(done)).toBe(false)
-    expect(isStreaming(chatMessage("msg_u", [], "user"))).toBe(false)
-  })
-
-  it("reports visibility by part count", () => {
-    expect(hasVisibleParts(chatMessage("msg_1"))).toBe(false)
-    expect(hasVisibleParts(chatMessage("msg_1", [textPart("p", "x")]))).toBe(true)
-  })
-
   it("labels tool parts by state", () => {
     expect(toolTitle(toolPart("c", { status: "running", input: {}, title: "Running ls" }))).toBe("Running ls")
     expect(toolTitle(toolPart("c", { status: "running", input: {} }))).toBe("bash")

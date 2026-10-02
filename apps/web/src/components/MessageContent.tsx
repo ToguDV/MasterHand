@@ -8,7 +8,6 @@ import {
   type ChatMessage,
   type ChatPart,
   type ChatReasoningPart,
-  type ChatSubtaskPart,
   type ChatTextPart,
   type ChatToolPart,
 } from "@masterhand/client-core"
@@ -154,32 +153,6 @@ function SubagentCall({
   )
 }
 
-function SubtaskCall({ part }: { part: ChatSubtaskPart }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/5">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
-      >
-        <span className="shrink-0 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-300">
-          Subagent
-        </span>
-        <span className="shrink-0 font-mono text-xs text-indigo-200">{part.agent}</span>
-        <span className="min-w-0 flex-1 truncate text-zinc-300">{part.description}</span>
-      </button>
-      {open && (
-        <div className="border-t border-indigo-500/20 px-3 py-2">
-          <pre className="scroll-thin max-h-60 overflow-auto whitespace-pre-wrap text-xs text-zinc-400">
-            {part.prompt}
-          </pre>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function PartView({
   part,
   onOpenSession,
@@ -198,8 +171,6 @@ function PartView({
       ) : (
         <ToolCall part={part} />
       )
-    case "subtask":
-      return <SubtaskCall part={part} />
     default:
       return null
   }

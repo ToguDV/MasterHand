@@ -7,15 +7,9 @@ export {
   appendDelta,
   directoryName,
   formatRelative,
-  hasVisibleParts,
-  isStreaming,
   isTaskTool,
   makeToolPart,
-  messageText,
-  partsFromContent,
   placeholderAssistant,
-  removeMessage,
-  replaceParts,
   sessionUsage,
   setMessageCost,
   setStreamText,
@@ -25,7 +19,6 @@ export {
   toChatMessage,
   toolTitle,
   updateToolPart,
-  upsertMessage,
   upsertToolPart,
   type SessionUsage,
   type StreamKind,
@@ -59,5 +52,5 @@ export {
   type EventHandlerCallbacks,
   type UseEventStreamOptions,
 } from "./hooks"
-export { filterSessions, rootSessions, sessionDirectory, type SessionFilter } from "./sessions"
+export { filterSessions, rootSessions, type SessionFilter } from "./sessions"
 export { reconcilePermissions } from "./permissions"

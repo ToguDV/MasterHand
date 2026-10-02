@@ -207,18 +207,7 @@ export type ChatToolPart = {
   state: ChatToolState
 }
 
-/** Kept for compatibility with the previous subagent card model. */
-export type ChatSubtaskPart = {
-  id: string
-  sessionID: string
-  messageID: string
-  type: "subtask"
-  prompt: string
-  description: string
-  agent: string
-}
-
-export type ChatPart = ChatTextPart | ChatReasoningPart | ChatToolPart | ChatSubtaskPart
+export type ChatPart = ChatTextPart | ChatReasoningPart | ChatToolPart
 
 export interface ChatMessage {
   info: ChatMessageInfo

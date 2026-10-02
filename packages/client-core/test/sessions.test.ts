@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { filterSessions, rootSessions, sessionDirectory } from "../src/sessions"
+import { filterSessions, rootSessions } from "../src/sessions"
 import type { Session } from "../src/types"
 
 function session(id: string, isolation?: Session["isolation"]): Session {
@@ -31,17 +31,5 @@ describe("rootSessions", () => {
     const parent = session("ses_parent")
     const child = { id: "ses_child", parentID: "ses_parent" } as Session
     expect(rootSessions([parent, child]).map((item) => item.id)).toEqual(["ses_parent"])
-  })
-})
-
-describe("sessionDirectory", () => {
-  it("prefers the worktree path for isolated sessions", () => {
-    expect(sessionDirectory(isolated, "/workspace/app")).toBe("/workspace/.worktrees/app/abc")
-  })
-
-  it("falls back to the workspace path for regular or missing sessions", () => {
-    expect(sessionDirectory(session("ses_plain"), "/workspace/app")).toBe("/workspace/app")
-    expect(sessionDirectory(null, "/workspace/app")).toBe("/workspace/app")
-    expect(sessionDirectory(undefined, null)).toBeNull()
   })
 })
