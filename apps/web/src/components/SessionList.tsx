@@ -15,6 +15,9 @@ const FILTERS: Array<{ value: SessionFilter; label: string }> = [
   { value: "standard", label: "Standard" },
 ]
 
+/** Sessions rendered at once; more load on demand (no virtualization). */
+const SESSION_PAGE_SIZE = 100
+
 export function SessionList({
   sessions,
   statuses,
@@ -36,8 +39,11 @@ export function SessionList({
 }) {
   const [filter, setFilter] = useState<SessionFilter>("all")
   const [isolated, setIsolated] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(SESSION_PAGE_SIZE)
   // Subagent children are reachable from their parent's card, not the list.
   const visible = filterSessions(rootSessions(sessions), filter)
+  const shown = visible.slice(0, visibleCount)
+  const remaining = visible.length - shown.length
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -95,7 +101,7 @@ export function SessionList({
               : "Add a workspace to start working on a project."}
           </p>
         )}
-        {visible.map((session) => {
+        {shown.map((session) => {
           const status = statuses[session.id]
           const active = session.id === selectedID
           return (
@@ -140,6 +146,15 @@ export function SessionList({
             </div>
           )
         })}
+        {remaining > 0 && (
+          <button
+            type="button"
+            onClick={() => setVisibleCount((count) => count + SESSION_PAGE_SIZE)}
+            className="w-full border-b border-zinc-900 px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200"
+          >
+            Show {Math.min(SESSION_PAGE_SIZE, remaining)} more ({remaining} hidden)
+          </button>
+        )}
       </div>
     </div>
   )
