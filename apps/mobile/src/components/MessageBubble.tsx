@@ -9,7 +9,6 @@ import {
   type ChatMessage,
   type ChatPart,
   type ChatReasoningPart,
-  type ChatSubtaskPart,
   type ChatTextPart,
   type ChatToolPart,
 } from "@masterhand/client-core"
@@ -124,28 +123,6 @@ function Subagent({ part, onOpenSession }: { part: ChatToolPart; onOpenSession?:
   )
 }
 
-function Subtask({ part }: { part: ChatSubtaskPart }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <View style={styles.subagentCard}>
-      <Pressable style={styles.toolHeader} onPress={() => setOpen((value) => !value)}>
-        <Text style={styles.subagentBadge}>SUBAGENT</Text>
-        <Text style={styles.subagentName} numberOfLines={1}>
-          {part.agent}
-        </Text>
-        <Text style={styles.toolTitle} numberOfLines={1}>
-          {part.description}
-        </Text>
-      </Pressable>
-      {open ? (
-        <View style={styles.toolBody}>
-          <Text style={styles.codeText}>{part.prompt}</Text>
-        </View>
-      ) : null}
-    </View>
-  )
-}
-
 function PartView({
   part,
   onOpenSession,
@@ -164,8 +141,6 @@ function PartView({
       ) : (
         <Tool part={part} />
       )
-    case "subtask":
-      return <Subtask part={part} />
     default:
       return null
   }

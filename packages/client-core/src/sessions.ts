@@ -18,11 +18,3 @@ export function filterSessions(sessions: Session[], filter: SessionFilter): Sess
 export function rootSessions(sessions: Session[]): Session[] {
   return sessions.filter((session) => !session.parentID)
 }
-
-/**
- * Directory opencode must be called with for a session: the worktree path when
- * it runs isolated, otherwise the workspace folder.
- */
-export function sessionDirectory(session: Session | null | undefined, fallback: string | null): string | null {
-  return session?.isolation?.worktreePath ?? fallback
-}

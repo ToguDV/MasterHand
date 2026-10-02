@@ -114,15 +114,6 @@ function projectContent(
   })
 }
 
-/** Maps a full assistant content snapshot (from a durable event). */
-export function partsFromContent(
-  content: ReadonlyArray<RawContentPart>,
-  sessionID: string,
-  messageID: string,
-): ChatPart[] {
-  return projectContent(content, sessionID, messageID)
-}
-
 /**
  * Adapts a v2 projected message to MasterHand's `ChatMessage` view model.
  * Non-chat entries (idle, system, shell, compaction, switches) return `null`.
@@ -204,18 +195,6 @@ export function mergeLiveMessages(
     for (const part of live.parts) if (!ids.has(part.id)) merged.push(part)
     return { ...message, parts: merged }
   })
-}
-
-export function upsertMessage(list: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  const index = list.findIndex((entry) => entry.info.id === message.info.id)
-  if (index === -1) return [...list, message]
-  const next = [...list]
-  next[index] = message
-  return next
-}
-
-export function removeMessage(list: ChatMessage[], messageID: string): ChatMessage[] {
-  return list.filter((entry) => entry.info.id !== messageID)
 }
 
 function updateMessage(
@@ -366,16 +345,6 @@ export function updateToolPart(
   )
 }
 
-/** Replaces a message's parts with a full projected snapshot. */
-export function replaceParts(
-  list: ChatMessage[],
-  sessionID: string,
-  messageID: string,
-  parts: ChatPart[],
-): ChatMessage[] {
-  return updateParts(list, sessionID, messageID, () => parts)
-}
-
 export function setMessageCost(
   list: ChatMessage[],
   sessionID: string,
@@ -409,21 +378,6 @@ export function sessionUsage(messages: ChatMessage[]): SessionUsage {
     tokens += message.info.tokens?.output ?? 0
   }
   return { cost, tokens }
-}
-
-export function messageText(message: ChatMessage): string {
-  return message.parts
-    .filter((part): part is Extract<ChatPart, { type: "text" }> => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-}
-
-export function isStreaming(message: ChatMessage): boolean {
-  return message.info.role === "assistant" && message.info.time.completed === undefined
-}
-
-export function hasVisibleParts(message: ChatMessage): boolean {
-  return message.parts.length > 0
 }
 
 export function toolTitle(part: ChatToolPart): string {
