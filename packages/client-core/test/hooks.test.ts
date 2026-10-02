@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { toChatMessage } from "../src/chat"
-import { createEventHandler, invalidateOnReconnect, queryKeys } from "../src/hooks"
-import type { ChatMessage, ChatPart, ChatToolPart, Permission, TokenUsageInfo } from "../src/types"
+import { createEventHandler, invalidateOnReconnect, mergeStatuses, queryKeys } from "../src/hooks"
+import type { ChatMessage, ChatPart, ChatToolPart, Permission, SessionStatuses, TokenUsageInfo } from "../src/types"
 
 const SESSION = "ses_1"
 
@@ -100,6 +100,43 @@ describe("createEventHandler", () => {
       expect(invalidate).toHaveBeenCalledTimes(2)
       expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(["agent.updated", "model.updated", "provider.updated", "models-dev.refreshed"])(
+    "refreshes the catalogs once per %s event",
+    (type) => {
+      vi.useFakeTimers()
+      try {
+        const { qc, invalidate } = makeQueryClient()
+        const handler = createEventHandler(qc)
+        emit(handler, type, {})
+        vi.advanceTimersByTime(250)
+        expect(invalidate).toHaveBeenCalledTimes(2)
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it("restarts the catalog window so a burst spanning it still refetches once", () => {
+    vi.useFakeTimers()
+    try {
+      const { qc, invalidate } = makeQueryClient()
+      const handler = createEventHandler(qc)
+      emit(handler, "agent.updated", {})
+      vi.advanceTimersByTime(200)
+      emit(handler, "provider.updated", {})
+      vi.advanceTimersByTime(200)
+      // A throttle would have fired at t=250; the debounce waits 250 ms after
+      // the last event of the burst.
+      expect(invalidate).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(50)
+      expect(invalidate).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }
@@ -551,6 +588,29 @@ describe("createEventHandler", () => {
     emit(handler, "unknown.event", {})
     expect(invalidate).not.toHaveBeenCalled()
     expect(onPermission).not.toHaveBeenCalled()
+  })
+})
+
+describe("mergeStatuses", () => {
+  it("keeps a status set by an event that raced the poll", () => {
+    const previous: SessionStatuses = { ses_1: { type: "busy" } }
+    expect(mergeStatuses(previous, {}, new Map([["ses_1", 100]]), 100)).toEqual(previous)
+  })
+
+  it("drops stale statuses and applies the snapshot", () => {
+    const previous: SessionStatuses = {
+      ses_1: { type: "busy" },
+      ses_2: { type: "retry", attempt: 2, message: "overloaded", next: 5 },
+    }
+    const snapshot: SessionStatuses = { ses_3: { type: "busy" } }
+    expect(mergeStatuses(previous, snapshot, new Map([["ses_1", 99]]), 100)).toEqual(snapshot)
+  })
+
+  it("lets the snapshot win for a session it reports", () => {
+    const previous: SessionStatuses = { ses_1: { type: "retry", attempt: 1, message: "x", next: 1 } }
+    expect(mergeStatuses(previous, { ses_1: { type: "busy" } }, new Map([["ses_1", 200]]), 100)).toEqual({
+      ses_1: { type: "busy" },
+    })
   })
 })
 

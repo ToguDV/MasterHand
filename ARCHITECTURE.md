@@ -107,6 +107,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 - Streaming events are keyed: text/reasoning by `assistantMessageID` + `ordinal` (numbered per kind), tool parts by their call `id`. Deltas append; `*.ended` carries the final text; tool `success`/`failed` carries the result `content`.
 - Client inactivity watchdog (60s without bytes → forced reconnect), reconnect when the tab/app becomes visible (`visibilitychange`) and when the network returns (`online`).
 - On (re)connect, `sessions`, `messages` and `statuses` are invalidated to reconcile missed events.
+- The statuses poll merges its snapshot into the event-set cache (`mergeStatuses`): a status set by an event at/after the poll started wins over the snapshot, so a poll that raced `execution.started` cannot hide the Stop button; statuses missing from the snapshot with no fresh event are dropped as idle.
 - Pending permissions are reconciled too (`GET /api/oc/api/permission/request` per workspace): a `permission.asked` lost while offline would otherwise leave the agent blocked with no prompt.
 - Fallback without SSE: connection down → polling (messages every 5s, statuses every 4s); active turn → messages every 3s.
 

@@ -56,7 +56,9 @@ function toolState(part: SessionMessageAssistantTool): ChatToolState {
     status: "error",
     input: state.input as Record<string, unknown>,
     output: toolOutput(state.content),
-    error: state.error.message,
+    // opencode can report `error` without a payload; never throw while
+    // projecting history.
+    error: state.error?.message ?? "Tool failed",
     metadata: state.metadata as Record<string, unknown> | undefined,
   }
 }

@@ -74,9 +74,22 @@ export function useWorkspaces(client: Client, enabled = true) {
 }
 
 export function useSessionStatuses(client: Client, enabled: boolean, connected: boolean) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: queryKeys.statuses,
-    queryFn: () => client.api.statuses(),
+    queryFn: async () => {
+      // A poll that starts before an event and resolves after it would erase
+      // the status the event just set (e.g. `execution.started` while the
+      // request was in flight). Merge instead of replacing.
+      const requestedAt = Date.now()
+      const snapshot = await client.api.statuses()
+      return mergeStatuses(
+        queryClient.getQueryData<SessionStatuses>(queryKeys.statuses),
+        snapshot,
+        statusWritesOf(queryClient),
+        requestedAt,
+      )
+    },
     enabled,
     refetchInterval: connected ? 15_000 : 4_000,
   })
@@ -141,16 +154,53 @@ function parseRawInput(raw: string | undefined): Record<string, unknown> {
   }
 }
 
+/**
+ * Timestamp of the last event-driven status write per session. The statuses
+ * poll uses it to tell whether its snapshot may be older than a status an
+ * event set while the request was in flight.
+ */
+const statusWriteTimes = new WeakMap<QueryClient, Map<string, number>>()
+
+function statusWritesOf(queryClient: QueryClient): Map<string, number> {
+  let times = statusWriteTimes.get(queryClient)
+  if (!times) {
+    times = new Map()
+    statusWriteTimes.set(queryClient, times)
+  }
+  return times
+}
+
+/**
+ * Merges the server's active-session snapshot into the event-driven cache. A
+ * status set by an event at/after `requestedAt` (when the poll started) wins
+ * over the snapshot, because the two raced; any other status missing from the
+ * snapshot is idle and gets dropped.
+ */
+export function mergeStatuses(
+  previous: SessionStatuses | undefined,
+  snapshot: SessionStatuses,
+  eventTimes: ReadonlyMap<string, number>,
+  requestedAt: number,
+): SessionStatuses {
+  const merged: SessionStatuses = {}
+  for (const [sessionID, status] of Object.entries(previous ?? {})) {
+    if (sessionID in snapshot) continue
+    if ((eventTimes.get(sessionID) ?? 0) >= requestedAt) merged[sessionID] = status
+  }
+  return { ...merged, ...snapshot }
+}
+
 /** Applies an opencode v2 event to the TanStack Query cache. Shared by every platform. */
 export function createEventHandler(
   queryClient: QueryClient,
   callbacks: EventHandlerCallbacks = {},
 ): (event: unknown) => void {
   // opencode emits one catalog event per location when it hot-reloads its
-  // config; coalesce the burst into a single refetch.
+  // config; coalesce the burst into a single trailing refetch (each new event
+  // restarts the window).
   let catalogRefreshTimer: ReturnType<typeof setTimeout> | null = null
   const refreshCatalogs = () => {
-    if (catalogRefreshTimer !== null) return
+    if (catalogRefreshTimer !== null) clearTimeout(catalogRefreshTimer)
     catalogRefreshTimer = setTimeout(() => {
       catalogRefreshTimer = null
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents })
@@ -163,6 +213,7 @@ export function createEventHandler(
     const event = raw as V2Event
 
     const setStatus = (sessionID: string, status: SessionStatuses[string]) => {
+      statusWritesOf(queryClient).set(sessionID, Date.now())
       queryClient.setQueryData<SessionStatuses>(queryKeys.statuses, (prev) => ({
         ...(prev ?? {}),
         [sessionID]: status,
