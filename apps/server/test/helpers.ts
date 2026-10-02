@@ -119,6 +119,39 @@ export async function startMockOpencode(): Promise<MockOpencode> {
         return
       }
 
+      if (req.method === "GET" && path === "/api/command") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            location: { directory: "/e2e" },
+            data: [
+              { name: "review", description: "review changes [commit|branch|pr], defaults to uncommitted" },
+              { name: "create-file", description: "Create a file with content" },
+              { name: "init", description: "guided AGENTS.md setup" },
+            ],
+          }),
+        )
+        return
+      }
+
+      if (req.method === "GET" && path === "/api/config") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify([
+            {
+              type: "document",
+              info: {
+                commands: {
+                  "create-file": { template: "Create a file named $1 in directory $2 with content: $3" },
+                  init: { template: "Say hello." },
+                },
+              },
+            },
+          ]),
+        )
+        return
+      }
+
       res.writeHead(404, { "content-type": "application/json" })
       res.end(JSON.stringify({ error: "not_found" }))
     })

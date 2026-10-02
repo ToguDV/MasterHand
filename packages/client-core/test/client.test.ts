@@ -324,6 +324,79 @@ describe("prompt", () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url).toContain("/prompt")
   })
+
+  it("forwards subagent mentions with the prompt", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ data: {} }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.prompt("ses_1", {
+      text: "@general hi",
+      agents: [{ name: "general", mention: { start: 0, end: 8, text: "@general" } }],
+    })
+
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      text: "@general hi",
+      agents: [{ name: "general", mention: { start: 0, end: 8, text: "@general" } }],
+    })
+  })
+})
+
+describe("commands", () => {
+  it("fetches the command catalog for a location", async () => {
+    const command = { name: "review", description: "review changes", arguments: [] }
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ commands: [command] }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.commands("/workspace/my app")).toEqual([command])
+    expect(calls[0]?.url).toBe("https://mh.example/api/commands?directory=%2Fworkspace%2Fmy%20app")
+  })
+
+  it("fetches the catalog without a location when none is given", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ commands: [] }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.commands()).toEqual([])
+    expect(calls[0]?.url).toBe("https://mh.example/api/commands")
+  })
+
+  it("runs a command with its argument text after switching context", async () => {
+    const { calls, fetchImpl } = recordingFetch(
+      () => new Response(null, { status: 204 }),
+      () => new Response(null, { status: 204 }),
+      () => new Response(null, { status: 204 }),
+    )
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.runCommand(
+      "ses_1",
+      { name: "create-file", text: "config.json src", agent: "plan", model: { id: "m2", providerID: "p" } },
+      { agent: "build" },
+    )
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://mh.example/api/oc/api/session/ses_1/agent",
+      "https://mh.example/api/oc/api/session/ses_1/model",
+      "https://mh.example/api/oc/api/session/ses_1/command",
+    ])
+    expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({ name: "create-file", text: "config.json src" })
+  })
+
+  it("forwards subagent mentions with the command", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => new Response(null, { status: 204 }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.runCommand("ses_1", {
+      name: "review",
+      text: "@general main",
+      agents: [{ name: "general", mention: { start: 0, end: 8, text: "@general" } }],
+    })
+
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      name: "review",
+      text: "@general main",
+      agents: [{ name: "general", mention: { start: 0, end: 8, text: "@general" } }],
+    })
+  })
 })
 
 describe("opencode session operations", () => {

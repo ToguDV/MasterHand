@@ -21,9 +21,11 @@ export interface FakeClient {
   auth: { status: jest.Mock }
   api: {
     agents: jest.Mock
+    commands: jest.Mock
     models: jest.Mock
     messages: jest.Mock
     prompt: jest.Mock
+    runCommand: jest.Mock
     abortSession: jest.Mock
     preview: jest.Mock
     startPreview: jest.Mock
@@ -38,9 +40,11 @@ export function fakeClient(): FakeClient & Client {
     auth: { status: jest.fn(async () => ({ ok: true })) },
     api: {
       agents: jest.fn(async () => []),
+      commands: jest.fn(async () => []),
       models: jest.fn(async () => ({ models: [], providers: [], defaultModel: null })),
       messages: jest.fn(async () => []),
       prompt: jest.fn(async () => {}),
+      runCommand: jest.fn(async () => {}),
       abortSession: jest.fn(async () => {}),
       preview: jest.fn(async () => STOPPED_PREVIEW),
       startPreview: jest.fn(async () => STOPPED_PREVIEW),

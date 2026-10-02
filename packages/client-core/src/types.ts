@@ -146,6 +146,41 @@ export interface PromptInput {
   agent?: string
   /** Model (and optional variant) to run the turn with. */
   model?: ModelRef
+  /** Subagents mentioned with `@` in `text`. */
+  agents?: PromptAgentMention[]
+}
+
+/** Input to run a slash command (the argument text plus optional context). */
+export interface RunCommandInput {
+  /** Command name without the leading slash. */
+  name: string
+  /** Argument text sent to the command. */
+  text: string
+  agent?: string
+  model?: ModelRef
+  agents?: PromptAgentMention[]
+}
+
+/** A subagent mention attached to a prompt, with the range it occupies in the text. */
+export interface PromptAgentMention {
+  /** Agent id opencode resolves the mention against. */
+  name: string
+  mention: { start: number; end: number; text: string }
+}
+
+/** Deterministic argument hint for a slash command (see the BFF `/api/commands`). */
+export interface CommandArgument {
+  /** 1-based positional slot; 0 when the command accepts free-form trailing text. */
+  position: number
+  freeForm: boolean
+  /** Candidate values parsed from the command's own description. Never generated. */
+  suggestions: string[]
+}
+
+export interface SlashCommand {
+  name: string
+  description?: string
+  arguments: CommandArgument[]
 }
 
 /** Current agent/model of the session, used to avoid redundant switch calls. */

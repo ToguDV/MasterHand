@@ -468,6 +468,16 @@ const AGENTS = [
   { id: "title", name: "title", mode: "primary", hidden: true },
 ]
 
+const COMMANDS = [
+  { name: "review", description: "review changes [commit|branch|pr], defaults to uncommitted" },
+  { name: "component", description: "Create a new component" },
+]
+
+const COMMAND_TEMPLATES: Record<string, string> = {
+  component: "Create a new React component named $ARGUMENTS with TypeScript support.",
+  review: "Review the changes: $ARGUMENTS",
+}
+
 const DEFAULT_DIRECTORY = "/e2e/project"
 
 const server = createServer((req, res) => {
@@ -551,6 +561,22 @@ const server = createServer((req, res) => {
     if (req.method === "GET" && path === "/api/provider") {
       return json(res, 200, { location: { directory: "/e2e" }, data: PROVIDERS })
     }
+    if (req.method === "GET" && path === "/api/command") {
+      return json(res, 200, { location: { directory: "/e2e" }, data: COMMANDS })
+    }
+    if (req.method === "GET" && path === "/api/config") {
+      return json(res, 200, [
+        {
+          type: "document",
+          info: {
+            commands: {
+              component: { template: "Create a new React component named $ARGUMENTS with TypeScript support." },
+              review: { template: "Review the changes: $ARGUMENTS" },
+            },
+          },
+        },
+      ])
+    }
 
     // The BFF writes the preview-port instruction entry on session create/start.
     if (
@@ -611,6 +637,24 @@ const server = createServer((req, res) => {
           },
         })
         return
+      }
+      if (req.method === "POST" && segments[3] === "command") {
+        if (!session) return json(res, 404, { error: "not_found" })
+        const body = await readBody(req)
+        const name = typeof body.name === "string" ? body.name : ""
+        const command = COMMANDS.find((item) => item.name === name)
+        if (!command) {
+          return json(res, 404, {
+            _tag: "CommandNotFoundError",
+            command: name,
+            message: `Command not found: ${name}`,
+          })
+        }
+        const args = typeof body.text === "string" ? body.text : ""
+        const template = COMMAND_TEMPLATES[name] ?? command.description
+        appendUserMessage(sessionID, template.replace("$ARGUMENTS", args))
+        broadcast("session.idle", { sessionID }, session.location.directory)
+        return empty(res, 204)
       }
       if (req.method === "POST" && segments[3] === "agent") {
         const body = await readBody(req)

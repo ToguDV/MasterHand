@@ -14,6 +14,11 @@ import {
   requireSameOrigin,
   setSessionCookie,
 } from "./auth.js"
+import {
+  deriveCommandArguments,
+  mergeCommandTemplates,
+  type SlashCommand,
+} from "./commands.js"
 import type { Config } from "./config.js"
 import type { EventHub } from "./events.js"
 import { createPreviewManager, previewSystemPrompt, PreviewError, type PreviewManager } from "./preview.js"
@@ -113,7 +118,7 @@ export function createApp(deps: AppDeps): Hono {
    */
   function callOpencode(
     path: string,
-    options: { method?: string; directory?: string | null; body?: unknown } = {},
+    options: { method?: string; directory?: string | null; location?: string | null; body?: unknown } = {},
   ): Promise<Response> {
     const method = options.method ?? "GET"
     const headers = new Headers()
@@ -122,6 +127,11 @@ export function createApp(deps: AppDeps): Hono {
     const target = new URL(path, config.opencodeUrl)
     if (options.directory) {
       target.searchParams.set("directory", options.directory)
+    }
+    if (options.location) {
+      // Location-scoped routes (`/api/command`, `/api/config`, …) take the
+      // nested `location[directory]` query, unlike the flat `/api/session`.
+      target.searchParams.set("location[directory]", options.location)
     }
     return fetchImpl(target, {
       method,
@@ -333,6 +343,46 @@ export function createApp(deps: AppDeps): Hono {
   api.delete("/devices/:id", (c) => {
     deps.store.remove(c.req.param("id"))
     return c.json({ ok: true })
+  })
+
+  /**
+   * Slash commands for a location, with deterministic argument hints. Composes
+   * opencode's `command` catalog with the templates only its config exposes, so
+   * raw config (which may hold secrets) never reaches the clients.
+   */
+  api.get("/commands", async (c) => {
+    const directory = c.req.query("directory") ?? null
+
+    let commandResponse: Response
+    try {
+      commandResponse = await callOpencode("/api/command", { location: directory })
+    } catch {
+      return c.json({ error: "opencode_unreachable" }, 502)
+    }
+    if (!commandResponse.ok) return c.json({ error: "opencode_error" }, 502)
+
+    // Argument hints are best-effort: a broken config must not hide commands.
+    let templates = new Map<string, string>()
+    try {
+      const configResponse = await callOpencode("/api/config", { location: directory })
+      if (configResponse.ok) templates = mergeCommandTemplates(await configResponse.json())
+    } catch {
+      // keep the commands without templates
+    }
+
+    const body = (await commandResponse.json()) as { data?: unknown }
+    const commands: SlashCommand[] = []
+    for (const raw of Array.isArray(body.data) ? body.data : []) {
+      const entry = raw as { name?: unknown; description?: unknown }
+      if (typeof entry?.name !== "string" || entry.name.length === 0) continue
+      const description = typeof entry.description === "string" ? entry.description : undefined
+      commands.push({
+        name: entry.name,
+        ...(description ? { description } : {}),
+        arguments: deriveCommandArguments(description, templates.get(entry.name)),
+      })
+    }
+    return c.json({ commands })
   })
 
   api.get("/workspaces", (c) => c.json({ workspaces: deps.store.listWorkspaces() }))

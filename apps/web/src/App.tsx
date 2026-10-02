@@ -431,6 +431,7 @@ export default function App() {
               busy={busy}
               connected={connected}
               workspaceID={workspaceID}
+              workspacePath={workspacePath}
               isolation={selected?.isolation}
               autoAccept={autoAcceptSessions.includes(sessionID)}
               onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}

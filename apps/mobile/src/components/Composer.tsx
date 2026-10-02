@@ -2,19 +2,27 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native"
 import {
   ApiError,
+  buildComposerPopover,
+  collectAgentMentions,
+  composerTrigger,
   defaultModelValue,
   flattenModels,
+  mentionableAgents,
   parseModel,
   recentModelValue,
   selectableAgents,
   sessionModelValue,
+  splitCommand,
   useAgents,
+  useCommands,
   useModels,
   useSessions,
   variantLabel,
   type Client,
+  type ComposerPopover,
 } from "@masterhand/client-core"
 import { ChoiceModal, type ChoiceOption } from "./ChoiceModal"
+import { ComposerSuggestions } from "./ComposerSuggestions"
 import { loadSessionPreferences, saveSessionPreferences } from "../storage"
 import { colors } from "../theme"
 
@@ -25,6 +33,7 @@ export function Composer({
   sessionID,
   busy,
   workspaceID,
+  directory = null,
   autoAccept,
   onToggleAutoAccept,
 }: {
@@ -32,14 +41,18 @@ export function Composer({
   sessionID: string
   busy: boolean
   workspaceID: string | null
+  directory?: string | null
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
 }) {
   const agentsQuery = useAgents(client)
   const modelsQuery = useModels(client)
   const sessionsQuery = useSessions(client, true, 10_000, workspaceID)
+  const commandsQuery = useCommands(client, directory)
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
+  const subagents = useMemo(() => mentionableAgents(agentsQuery.data ?? []), [agentsQuery.data])
+  const commands = commandsQuery.data ?? []
   const catalog = modelsQuery.data
   const modelOptions = useMemo(
     () => flattenModels(catalog?.models ?? [], catalog?.providers ?? []),
@@ -59,6 +72,9 @@ export function Composer({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [picker, setPicker] = useState<OpenPicker>(null)
+  const [caret, setCaret] = useState(0)
+  const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>(undefined)
+  const [dismissed, setDismissed] = useState(false)
   const modelTouched = useRef(false)
   const loaded = useRef(false)
 
@@ -116,6 +132,29 @@ export function Composer({
     void saveSessionPreferences(sessionID, { agent, model, variant })
   }, [sessionID, agent, model, variant])
 
+  const trigger = useMemo(
+    () => (dismissed ? null : composerTrigger(text, caret)),
+    [text, caret, dismissed],
+  )
+
+  const popover = useMemo<ComposerPopover | null>(
+    () => (trigger ? buildComposerPopover(trigger, commands, subagents) : null),
+    [trigger, commands, subagents],
+  )
+
+  function selectSuggestion(id: string): void {
+    if (!popover || !trigger) return
+    const item = popover.items.find((entry) => entry.id === id)
+    if (!item) return
+    const end = item.replacement.endsWith(" ") && text[trigger.end] === " " ? trigger.end + 1 : trigger.end
+    const next = text.slice(0, trigger.start) + item.replacement + text.slice(end)
+    const position = trigger.start + item.replacement.length
+    setText(next)
+    setCaret(position)
+    setForcedSelection({ start: position, end: position })
+    setDismissed(false)
+  }
+
   async function send() {
     const trimmed = text.trim()
     if (!trimmed || sending) return
@@ -123,16 +162,31 @@ export function Composer({
     setError(null)
     try {
       const modelValue = model ? parseModel(model, variant || undefined) : undefined
-      await client.api.prompt(
-        sessionID,
-        {
-          text: trimmed,
-          ...(agent ? { agent } : {}),
-          ...(modelValue ? { model: modelValue } : {}),
-        },
-        { agent: session?.agent, model: session?.model },
-      )
+      const command = splitCommand(trimmed, commands)
+      const mentionText = command ? command.text : trimmed
+      const mentions = collectAgentMentions(mentionText, subagents)
+      const context = {
+        ...(agent ? { agent } : {}),
+        ...(modelValue ? { model: modelValue } : {}),
+        ...(mentions.length > 0 ? { agents: mentions } : {}),
+      }
+      if (command) {
+        await client.api.runCommand(
+          sessionID,
+          { name: command.command.name, text: command.text, ...context },
+          { agent: session?.agent, model: session?.model },
+        )
+      } else {
+        await client.api.prompt(
+          sessionID,
+          { text: trimmed, ...context },
+          { agent: session?.agent, model: session?.model },
+        )
+      }
       setText("")
+      setCaret(0)
+      setForcedSelection(undefined)
+      setDismissed(false)
     } catch (err) {
       setError(err instanceof ApiError ? `Could not send (HTTP ${err.status})` : "Could not send")
     } finally {
@@ -188,11 +242,29 @@ export function Composer({
         </Pressable>
       </View>
 
+      {popover && (
+        <ComposerSuggestions
+          title={popover.title}
+          hint={popover.hint}
+          items={popover.items}
+          emptyLabel={popover.emptyLabel}
+          onSelect={selectSuggestion}
+        />
+      )}
+
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
           value={text}
-          onChangeText={setText}
+          onChangeText={(value) => {
+            setText(value)
+            setDismissed(false)
+          }}
+          selection={forcedSelection}
+          onSelectionChange={(event) => {
+            setCaret(event.nativeEvent.selection.start)
+            if (forcedSelection) setForcedSelection(undefined)
+          }}
           placeholder="Write a message…"
           placeholderTextColor={colors.muted}
           multiline
