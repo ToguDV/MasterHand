@@ -13,7 +13,6 @@ export {
   sessionUsage,
   setMessageCost,
   setStreamText,
-  splitFences,
   subagentInfo,
   subagentOutput,
   toChatMessage,
@@ -23,7 +22,6 @@ export {
   type SessionUsage,
   type StreamKind,
   type SubagentInfo,
-  type TextSegment,
 } from "./chat"
 export {
   defaultModelValue,

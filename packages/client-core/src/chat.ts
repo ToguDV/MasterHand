@@ -442,27 +442,4 @@ export function formatRelative(timestamp: number, now = Date.now()): string {
   return new Date(timestamp).toLocaleDateString()
 }
 
-export interface TextSegment {
-  type: "text" | "code"
-  content: string
-  language?: string
-}
 
-export function splitFences(text: string): TextSegment[] {
-  const segments: TextSegment[] = []
-  const pattern = /```([\w-]*)\n([\s\S]*?)```/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({ type: "text", content: text.slice(lastIndex, match.index) })
-    }
-    segments.push({ type: "code", content: match[2] ?? "", language: match[1] || undefined })
-    lastIndex = match.index + match[0].length
-  }
-  if (lastIndex < text.length) {
-    segments.push({ type: "text", content: text.slice(lastIndex) })
-  }
-  return segments.filter((segment) => segment.content.trim().length > 0)
-}
