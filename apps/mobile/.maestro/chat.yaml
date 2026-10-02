@@ -1,0 +1,62 @@
+# Mobile E2E happy path: sign in with the device flow, add a workspace, create a
+# session, send a prompt, approve the permission the mock requests and see the
+# reply. Runs against the mock opencode + BFF harness (see
+# docs/runbooks/mobile-e2e.md); the app is loaded in Expo Go.
+#
+# Env vars (all required):
+#   MAESTRO_APP_URL       exp:// URL of the Metro dev server (e.g. exp://127.0.0.1:8081)
+#   MASTERHAND_URL        BFF base URL the app signs in to (e.g. http://127.0.0.1:8788)
+#   MASTERHAND_PASSWORD   BFF password (MASTERHAND_PASSWORD)
+appId: host.exp.exponent
+---
+- openLink: ${MAESTRO_APP_URL}
+
+- extendedWaitUntil:
+    visible: "MasterHand"
+    timeout: 90000
+
+- tapOn:
+    id: "server-url-input"
+- inputText: ${MASTERHAND_URL}
+- tapOn:
+    id: "password-input"
+- inputText: ${MASTERHAND_PASSWORD}
+- tapOn: "Sign in"
+
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+
+# No workspace on a fresh harness: create one from the bottom sheet.
+- tapOn: "Add a workspace"
+- tapOn: "Add workspace"
+- tapOn:
+    id: "workspace-name-input"
+- inputText: "demo"
+- tapOn: "Add"
+# The sheet stays open after a successful add; dismiss it on the backdrop.
+- tapOn:
+    point: "50%,8%"
+
+- tapOn:
+    id: "new-session-button"
+- extendedWaitUntil:
+    visible: "Write a message…"
+    timeout: 20000
+
+- tapOn:
+    id: "composer-input"
+- inputText: "hello"
+- tapOn: "Send"
+
+- extendedWaitUntil:
+    visible: "Working…"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "Permission required"
+    timeout: 20000
+- tapOn: "Once"
+
+- extendedWaitUntil:
+    visible: "Done!"
+    timeout: 20000

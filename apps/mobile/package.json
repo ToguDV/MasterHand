@@ -9,6 +9,7 @@
     "ios": "expo start --ios",
     "test": "jest",
     "test:coverage": "jest --coverage",
+    "e2e:maestro": "maestro test .maestro/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
