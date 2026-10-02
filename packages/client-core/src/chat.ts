@@ -364,24 +364,59 @@ export function setMessageCost(
   }))
 }
 
-export interface SessionUsage {
-  /** Total cost reported by opencode (already includes input, output and cache). */
-  cost: number
+/** Token categories of an opencode `TokenUsageInfo`, normalized to numbers. */
+export interface TokenCounts {
   input: number
   output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+}
+
+/** Normalizes an opencode `TokenUsageInfo` into flat token counts. */
+export function tokenCounts(tokens?: TokenUsageInfo): TokenCounts {
+  return {
+    input: tokens?.input ?? 0,
+    output: tokens?.output ?? 0,
+    reasoning: tokens?.reasoning ?? 0,
+    cacheRead: tokens?.cache?.read ?? 0,
+    cacheWrite: tokens?.cache?.write ?? 0,
+  }
+}
+
+/**
+ * Human-readable token breakdown, skipping zero categories. Returns an empty
+ * string when there is no usage, so callers can render it conditionally.
+ */
+export function formatTokens(counts: TokenCounts): string {
+  const parts: string[] = []
+  if (counts.input > 0) parts.push(`${counts.input} input`)
+  if (counts.output > 0) parts.push(`${counts.output} output`)
+  if (counts.reasoning > 0) parts.push(`${counts.reasoning} reasoning`)
+  if (counts.cacheRead > 0) parts.push(`${counts.cacheRead} cache read`)
+  if (counts.cacheWrite > 0) parts.push(`${counts.cacheWrite} cache write`)
+  return parts.join(" · ")
+}
+
+export interface SessionUsage extends TokenCounts {
+  /** Total cost reported by opencode (already includes input, output and cache). */
+  cost: number
 }
 
 export function sessionUsage(messages: ChatMessage[]): SessionUsage {
   let cost = 0
-  let input = 0
-  let output = 0
+  const totals: TokenCounts = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
   for (const message of messages) {
     if (message.info.role !== "assistant") continue
     cost += message.info.cost ?? 0
-    input += message.info.tokens?.input ?? 0
-    output += message.info.tokens?.output ?? 0
+    const counts = tokenCounts(message.info.tokens)
+    totals.input += counts.input
+    totals.output += counts.output
+    totals.reasoning += counts.reasoning
+    totals.cacheRead += counts.cacheRead
+    totals.cacheWrite += counts.cacheWrite
   }
-  return { cost, input, output }
+  return { cost, ...totals }
 }
 
 export function toolTitle(part: ChatToolPart): string {

@@ -2,6 +2,7 @@ import { useRef, useState } from "react"
 import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native"
 import { useQueryClient } from "@tanstack/react-query"
 import {
+  formatTokens,
   sessionUsage,
   useBffStatus,
   useMessages,
@@ -53,6 +54,7 @@ export function ChatScreen({
   const [finishError, setFinishError] = useState<string | null>(null)
   const messages = messagesQuery.data ?? []
   const usage = sessionUsage(messages)
+  const tokenBreakdown = formatTokens(usage)
 
   async function finish() {
     setFinishing(true)
@@ -103,12 +105,10 @@ export function ChatScreen({
         renderItem={({ item }) => <MessageBubble entry={item} onOpenSession={onOpenSession} />}
       />
 
-      {(usage.cost > 0 || usage.input > 0 || usage.output > 0) ? (
+      {(usage.cost > 0 || tokenBreakdown) ? (
         <Text style={styles.usage}>
           Session · ${usage.cost.toFixed(4)}
-          {usage.input > 0 ? ` · ${usage.input} in` : ""}
-          {usage.output > 0 ? ` · ${usage.output} out` : ""}
-          {usage.input > 0 || usage.output > 0 ? " tok" : ""}
+          {tokenBreakdown ? ` · ${tokenBreakdown}` : ""}
         </Text>
       ) : null}
 

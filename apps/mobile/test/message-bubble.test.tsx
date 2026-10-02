@@ -100,7 +100,7 @@ describe("MessageBubble", () => {
     )
 
     expect(screen.getByText("boom")).toBeOnTheScreen()
-    expect(screen.getByText("test-model · $0.0021 · 1000 in · 42 out tok")).toBeOnTheScreen()
+    expect(screen.getByText("test-model · $0.0021 · 1000 input · 42 output")).toBeOnTheScreen()
   })
 
   it("reveals reasoning text on demand", async () => {

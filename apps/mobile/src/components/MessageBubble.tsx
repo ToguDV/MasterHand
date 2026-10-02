@@ -2,9 +2,11 @@ import { useState } from "react"
 import { Pressable, StyleSheet, Text, View } from "react-native"
 import Markdown, { darkStyles, type MarkdownStyleMap } from "@ronradtke/react-native-markdown-display"
 import {
+  formatTokens,
   isTaskTool,
   subagentInfo,
   subagentOutput,
+  tokenCounts,
   toolTitle,
   type ChatMessage,
   type ChatPart,
@@ -214,6 +216,7 @@ export function MessageBubble({
   const visible = entry.parts
   const streaming = info.time.completed === undefined
   const errorMessage = info.error ? info.error.message || "Agent error" : null
+  const breakdown = formatTokens(tokenCounts(info.tokens))
 
   return (
     <View style={styles.assistantBlock}>
@@ -226,9 +229,7 @@ export function MessageBubble({
         <Text style={styles.caption}>
           {info.modelID}
           {(info.cost ?? 0) > 0 ? ` · $${(info.cost ?? 0).toFixed(4)}` : ""}
-          {(info.tokens?.input ?? 0) > 0 ? ` · ${info.tokens?.input} in` : ""}
-          {(info.tokens?.output ?? 0) > 0 ? ` · ${info.tokens?.output} out` : ""}
-          {(info.tokens?.input ?? 0) > 0 || (info.tokens?.output ?? 0) > 0 ? " tok" : ""}
+          {breakdown ? ` · ${breakdown}` : ""}
         </Text>
       ) : null}
     </View>

@@ -7,6 +7,7 @@ export {
   appendDelta,
   directoryName,
   formatRelative,
+  formatTokens,
   isTaskTool,
   makeToolPart,
   placeholderAssistant,
@@ -16,12 +17,14 @@ export {
   subagentInfo,
   subagentOutput,
   toChatMessage,
+  tokenCounts,
   toolTitle,
   updateToolPart,
   upsertToolPart,
   type SessionUsage,
   type StreamKind,
   type SubagentInfo,
+  type TokenCounts,
 } from "./chat"
 export {
   defaultModelValue,

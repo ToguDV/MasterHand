@@ -3,9 +3,11 @@ import ReactMarkdown, { type Components } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
 import {
+  formatTokens,
   isTaskTool,
   subagentInfo,
   subagentOutput,
+  tokenCounts,
   toolTitle,
   type ChatMessage,
   type ChatPart,
@@ -245,6 +247,7 @@ export function AssistantBlock({
   const info = entry.info
   const streaming = info.time.completed === undefined
   const errorMessage = info.error ? info.error.message || "Agent error" : null
+  const breakdown = formatTokens(tokenCounts(info.tokens))
 
   return (
     <div className="flex flex-col gap-2">
@@ -264,9 +267,7 @@ export function AssistantBlock({
         <p className="text-xs text-zinc-600">
           {info.modelID}
           {(info.cost ?? 0) > 0 ? ` · $${(info.cost ?? 0).toFixed(4)}` : ""}
-          {(info.tokens?.input ?? 0) > 0 ? ` · ${info.tokens?.input} in` : ""}
-          {(info.tokens?.output ?? 0) > 0 ? ` · ${info.tokens?.output} out` : ""}
-          {(info.tokens?.input ?? 0) > 0 || (info.tokens?.output ?? 0) > 0 ? " tok" : ""}
+          {breakdown ? ` · ${breakdown}` : ""}
         </p>
       )}
     </div>

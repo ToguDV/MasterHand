@@ -53,7 +53,7 @@ describe("ChatScreen", () => {
 
     expect(await screen.findByText("reply from agent")).toBeOnTheScreen()
     expect(screen.getByText("My session")).toBeOnTheScreen()
-    expect(screen.getByText("Session · $0.0010 · 20 in · 5 out tok")).toBeOnTheScreen()
+    expect(screen.getByText("Session · $0.0010 · 20 input · 5 output")).toBeOnTheScreen()
   })
 
   it("prompts to start when there are no messages", async () => {

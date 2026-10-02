@@ -14,6 +14,7 @@ import {
   appendDelta,
   directoryName,
   formatRelative,
+  formatTokens,
   isTaskTool,
   makeToolPart,
   mergeLiveMessages,
@@ -24,6 +25,7 @@ import {
   subagentInfo,
   subagentOutput,
   toChatMessage,
+  tokenCounts,
   toolTitle,
   updateToolPart,
   upsertToolPart,
@@ -31,8 +33,13 @@ import {
 
 const SESSION = "ses_1"
 
-function tokens(output: number, input = 0): TokenUsageInfo {
-  return { input, output, reasoning: 0, cache: { read: 0, write: 0 } }
+function tokens(
+  output: number,
+  input = 0,
+  reasoning = 0,
+  cache: { read: number; write: number } = { read: 0, write: 0 },
+): TokenUsageInfo {
+  return { input, output, reasoning, cache }
 }
 
 function userMessage(id: string, text = "hi", created = 1): SessionMessageUser {
@@ -532,18 +539,77 @@ describe("setMessageCost", () => {
 })
 
 describe("sessionUsage", () => {
-  it("totals cost, input and output tokens across assistant messages only", () => {
+  it("totals cost and every token category across assistant messages only", () => {
     const list: ChatMessage[] = [
       chatMessage("msg_u", [], "user"),
-      { ...chatMessage("msg_a1"), info: { ...chatMessage("msg_a1").info, cost: 0.5, tokens: tokens(100, 1000) } },
-      { ...chatMessage("msg_a2"), info: { ...chatMessage("msg_a2").info, cost: 0.25, tokens: tokens(50, 200) } },
+      {
+        ...chatMessage("msg_a1"),
+        info: {
+          ...chatMessage("msg_a1").info,
+          cost: 0.5,
+          tokens: tokens(100, 1000, 20, { read: 50, write: 10 }),
+        },
+      },
+      {
+        ...chatMessage("msg_a2"),
+        info: {
+          ...chatMessage("msg_a2").info,
+          cost: 0.25,
+          tokens: tokens(50, 200, 5, { read: 30, write: 2 }),
+        },
+      },
     ]
-    expect(sessionUsage(list)).toEqual({ cost: 0.75, input: 1200, output: 150 })
+    expect(sessionUsage(list)).toEqual({
+      cost: 0.75,
+      input: 1200,
+      output: 150,
+      reasoning: 25,
+      cacheRead: 80,
+      cacheWrite: 12,
+    })
   })
 
   it("tolerates assistant messages without usage", () => {
-    expect(sessionUsage([chatMessage("msg_a")])).toEqual({ cost: 0, input: 0, output: 0 })
-    expect(sessionUsage([])).toEqual({ cost: 0, input: 0, output: 0 })
+    expect(sessionUsage([chatMessage("msg_a")])).toEqual({
+      cost: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    })
+    expect(sessionUsage([])).toEqual({
+      cost: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    })
+  })
+})
+
+describe("tokenCounts and formatTokens", () => {
+  it("normalizes a full TokenUsageInfo", () => {
+    expect(tokenCounts(tokens(100, 1000, 20, { read: 50, write: 10 }))).toEqual({
+      input: 1000,
+      output: 100,
+      reasoning: 20,
+      cacheRead: 50,
+      cacheWrite: 10,
+    })
+  })
+
+  it("normalizes missing tokens to zeros", () => {
+    expect(tokenCounts(undefined)).toEqual({ input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 })
+  })
+
+  it("formats every non-zero category, skipping the rest", () => {
+    expect(formatTokens(tokenCounts(tokens(100, 1000, 20, { read: 50, write: 10 })))).toBe(
+      "1000 input · 100 output · 20 reasoning · 50 cache read · 10 cache write",
+    )
+    expect(formatTokens(tokenCounts(tokens(100, 1000)))).toBe("1000 input · 100 output")
+    expect(formatTokens(tokenCounts(undefined))).toBe("")
   })
 })
 
