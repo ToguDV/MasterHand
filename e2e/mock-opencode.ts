@@ -18,6 +18,7 @@ interface ModelRef {
 interface SessionRecord {
   id: string
   parentID?: string
+  fork?: { sessionID: string; boundary: { type: "through"; messageID: string } }
   projectID: string
   agent?: string
   model?: ModelRef
@@ -609,6 +610,12 @@ const server = createServer((req, res) => {
         const next = offset + limit < ordered.length ? String(offset + limit) : null
         return json(res, 200, { data: page, cursor: { previous: null, next } })
       }
+      if (req.method === "POST" && segments[3] === "fork") {
+        if (!session) return json(res, 404, { error: "not_found" })
+        const forked = createSession({ directory: session.location.directory })
+        forked.fork = { sessionID, boundary: { type: "through", messageID: "msg_fork" } }
+        return json(res, 200, { data: forked })
+      }
       if (req.method === "POST" && segments[3] === "prompt") {
         if (!session) return json(res, 404, { error: "not_found" })
         const body = await readBody(req)
@@ -622,6 +629,11 @@ const server = createServer((req, res) => {
           for (let index = 1; index <= count; index += 1) {
             appendUserMessage(sessionID, `Seed message ${index}`)
           }
+          broadcast("session.idle", { sessionID }, session.location.directory)
+        } else if (session.fork) {
+          // `/btw` side questions answer immediately without a permission dance.
+          const assistant = appendAssistantMessage(sessionID)
+          assistant.content = [{ type: "text", text: `Side answer to: ${text}` }]
           broadcast("session.idle", { sessionID }, session.location.directory)
         } else {
           void runPrompt(sessionID, text)

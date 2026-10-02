@@ -182,6 +182,7 @@ export function ChatView({
       <Composer
         sessionID={sessionID}
         busy={busy}
+        connected={connected}
         workspaceID={workspaceID}
         directory={isolation?.worktreePath ?? workspacePath}
         autoAccept={autoAccept}

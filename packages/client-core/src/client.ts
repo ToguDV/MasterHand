@@ -76,6 +76,10 @@ export interface Client {
     prompt(sessionID: string, input: PromptInput, current?: PromptContext): Promise<void>
     /** Runs a slash command (`/name args`) with the same agent/model switching. */
     runCommand(sessionID: string, input: RunCommandInput, current?: PromptContext): Promise<void>
+    /** Forks a session (full context) for a temporary side question. */
+    forkSession(sessionID: string, before?: string): Promise<Session>
+    /** Deletes a session (used to discard a side-question fork). */
+    removeSession(sessionID: string): Promise<void>
     /** Interrupts the running turn; returns whether anything was interrupted. */
     abortSession(sessionID: string): Promise<boolean>
     /** Pending permission requests, optionally scoped to a location. */
@@ -288,6 +292,10 @@ export function createClient(options: ClientOptions = {}): Client {
             ...(input.agents && input.agents.length > 0 ? { agents: input.agents } : {}),
           })
         }),
+      forkSession: (sessionID, before) =>
+        opencodeRequest(() => opencode.session.fork(before ? { sessionID, before } : { sessionID })),
+      removeSession: (sessionID) =>
+        opencodeRequest(() => opencode.session.remove({ sessionID })),
       abortSession: (sessionID) =>
         opencodeRequest(() =>
           opencode.session.interrupt({ sessionID }).then((response) => response.interrupted),

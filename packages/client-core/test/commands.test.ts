@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  appCommands,
   argumentSuggestions,
   buildComposerPopover,
   collectAgentMentions,
@@ -8,6 +9,7 @@ import {
   filterAgentMentions,
   filterCommands,
   mentionableAgents,
+  mergeCommands,
   splitCommand,
 } from "../src/commands"
 import type { AgentInfo, SlashCommand } from "../src/types"
@@ -178,5 +180,19 @@ describe("splitCommand", () => {
   it("returns null for unknown commands or plain text", () => {
     expect(splitCommand("/nope x", commands)).toBeNull()
     expect(splitCommand("hello /review", commands)).toBeNull()
+  })
+})
+
+describe("app commands", () => {
+  it("prepends MasterHand's own commands and reserves their names", () => {
+    const server = [{ name: "btw", description: "server btw", arguments: [] }, ...commands]
+    const merged = mergeCommands(server)
+    expect(merged[0]).toBe(appCommands[0])
+    expect(merged.find((command) => command.name === "btw")).toBe(appCommands[0])
+    expect(merged.map((command) => command.name)).toEqual(["btw", "review", "init", "component"])
+  })
+
+  it("routes /btw through splitCommand", () => {
+    expect(splitCommand("/btw what changed?", mergeCommands(commands))?.command.name).toBe("btw")
   })
 })
