@@ -227,6 +227,22 @@ describe("toChatMessage", () => {
     })
   })
 
+  it("survives an error tool state without an error payload", () => {
+    const failed = toChatMessage(
+      assistantMessage({
+        content: [
+          toolMessage("tool_5", "bash", {
+            status: "error",
+            input: {},
+          } as unknown as SessionMessageAssistantTool["state"]),
+        ],
+      }),
+      SESSION,
+    )
+    const part = failed?.parts[0] as ChatToolPart
+    expect(part.state).toMatchObject({ status: "error", error: "Tool failed" })
+  })
+
   it("omits tool output when there is no renderable content", () => {
     const running = toChatMessage(
       assistantMessage({

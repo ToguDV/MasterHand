@@ -6,8 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Client } from "../src/client"
-import type { ChatMessage } from "../src/types"
+import type { ChatMessage, SessionStatuses } from "../src/types"
 import {
+  createEventHandler,
   queryKeys,
   useAgents,
   useBffStatus,
@@ -98,6 +99,37 @@ describe("query hooks", () => {
     const { result } = renderHook(() => useSessionStatuses(client, true, true), { wrapper: wrapper(qc) })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(api.statuses).toHaveBeenCalledTimes(1)
+  })
+
+  it("useSessionStatuses keeps a status set while the poll is in flight", async () => {
+    const qc = newQueryClient()
+    const { client, api } = makeClient()
+    let resolveSnapshot!: (snapshot: SessionStatuses) => void
+    api.statuses.mockReturnValue(
+      new Promise<SessionStatuses>((resolve) => {
+        resolveSnapshot = resolve
+      }),
+    )
+
+    const { result } = renderHook(() => useSessionStatuses(client, true, true), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(api.statuses).toHaveBeenCalledTimes(1))
+
+    // The event lands while the snapshot request is still pending.
+    createEventHandler(qc)({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+    resolveSnapshot({})
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toEqual({ ses_1: { type: "busy" } })
+  })
+
+  it("useSessionStatuses trusts the snapshot for statuses with no fresh event", async () => {
+    const qc = newQueryClient()
+    const { client, api } = makeClient()
+    qc.setQueryData<SessionStatuses>(queryKeys.statuses, { ses_1: { type: "busy" } })
+
+    const { result } = renderHook(() => useSessionStatuses(client, true, true), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(api.statuses).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(result.current.data).toEqual({}))
   })
 
   it("useMessages stays disabled without a session", async () => {
