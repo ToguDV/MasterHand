@@ -35,6 +35,8 @@ Everything lives under `/api/*`. The BFF proxy strips its own `/api/oc` prefix, 
 | `GET` | `/api/session/:id/message` | History. Query: `limit`, `order` (`asc`/`desc`), `cursor`, `type`; responds `{ data: Session.Message.Info[], cursor }` |
 | `POST` | `/api/session/:id/prompt` | Send a prompt. Body `{ text, files?, agents?, skills?, metadata?, delivery?, resume? }`; responds `{ data: Session.Inbox.User }` |
 | `POST` | `/api/session/:id/command` | Run a slash command. Body `{ name, text, agents?, ... }`; the argument text is the rest of the message. `204`; `404 CommandNotFoundError` for an unknown command |
+| `POST` | `/api/session/:id/fork` | Fork a session with its context; body `{ before?: messageID }`; responds `{ data: SessionInfo }` (with `fork: { sessionID, boundary }`). **MasterHand uses it for `/btw` side questions**, then deletes the fork |
+| `DELETE` | `/api/session/:id` | Delete session and its children (session id resolves the location, no `directory` needed). MasterHand deletes the `/btw` fork this way |
 | `POST` | `/api/session/:id/interrupt` | Stop the running turn; responds `{ interrupted: boolean }` |
 | `POST` | `/api/session/:id/agent` | Switch agent; body `{ agent: string }`; `204` |
 | `POST` | `/api/session/:id/model` | Switch model; body `{ model: { id, providerID, variant? } }`; `204` |

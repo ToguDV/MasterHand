@@ -8,6 +8,7 @@ import {
   defaultModelValue,
   flattenModels,
   mentionableAgents,
+  mergeCommands,
   parseModel,
   recentModelValue,
   selectableAgents,
@@ -23,6 +24,7 @@ import {
 } from "@masterhand/client-core"
 import { ChoiceModal, type ChoiceOption } from "./ChoiceModal"
 import { ComposerSuggestions } from "./ComposerSuggestions"
+import { SideQuestionPanel } from "./SideQuestionPanel"
 import { loadSessionPreferences, saveSessionPreferences } from "../storage"
 import { colors } from "../theme"
 
@@ -32,6 +34,7 @@ export function Composer({
   client,
   sessionID,
   busy,
+  connected = true,
   workspaceID,
   directory = null,
   autoAccept,
@@ -40,6 +43,7 @@ export function Composer({
   client: Client
   sessionID: string
   busy: boolean
+  connected?: boolean
   workspaceID: string | null
   directory?: string | null
   autoAccept: boolean
@@ -52,7 +56,7 @@ export function Composer({
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
   const subagents = useMemo(() => mentionableAgents(agentsQuery.data ?? []), [agentsQuery.data])
-  const commands = commandsQuery.data ?? []
+  const commands = useMemo(() => mergeCommands(commandsQuery.data ?? []), [commandsQuery.data])
   const catalog = modelsQuery.data
   const modelOptions = useMemo(
     () => flattenModels(catalog?.models ?? [], catalog?.providers ?? []),
@@ -75,8 +79,12 @@ export function Composer({
   const [caret, setCaret] = useState(0)
   const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>(undefined)
   const [dismissed, setDismissed] = useState(false)
+  const [sideQuestion, setSideQuestion] = useState<{ sessionID: string; question: string } | null>(null)
+  const [startingSideQuestion, setStartingSideQuestion] = useState(false)
   const modelTouched = useRef(false)
   const loaded = useRef(false)
+  const sideQuestionRef = useRef(sideQuestion)
+  sideQuestionRef.current = sideQuestion
 
   const variants = useMemo(
     () => modelOptions.find((option) => option.value === model)?.variants ?? [],
@@ -132,6 +140,15 @@ export function Composer({
     void saveSessionPreferences(sessionID, { agent, model, variant })
   }, [sessionID, agent, model, variant])
 
+  // A side-question fork must not outlive the composer (session switch/reload).
+  useEffect(
+    () => () => {
+      const current = sideQuestionRef.current
+      if (current) void client.api.removeSession(current.sessionID).catch(() => {})
+    },
+    [client],
+  )
+
   const trigger = useMemo(
     () => (dismissed ? null : composerTrigger(text, caret)),
     [text, caret, dismissed],
@@ -158,11 +175,15 @@ export function Composer({
   async function send() {
     const trimmed = text.trim()
     if (!trimmed || sending) return
+    const command = splitCommand(trimmed, commands)
+    if (command?.command.name === "btw") {
+      await askSideQuestion(command.text)
+      return
+    }
     setSending(true)
     setError(null)
     try {
       const modelValue = model ? parseModel(model, variant || undefined) : undefined
-      const command = splitCommand(trimmed, commands)
       const mentionText = command ? command.text : trimmed
       const mentions = collectAgentMentions(mentionText, subagents)
       const context = {
@@ -192,6 +213,44 @@ export function Composer({
     } finally {
       setSending(false)
     }
+  }
+
+  /** `/btw`: fork the session, ask the question there and show the answer in a panel. */
+  async function askSideQuestion(question: string) {
+    if (!question) {
+      setError("Write a question after /btw")
+      return
+    }
+    setStartingSideQuestion(true)
+    setError(null)
+    try {
+      const fork = await client.api.forkSession(sessionID)
+      const modelValue = model ? parseModel(model, variant || undefined) : undefined
+      await client.api.prompt(fork.id, {
+        text: question,
+        ...(agent ? { agent } : {}),
+        ...(modelValue ? { model: modelValue } : {}),
+      })
+      setSideQuestion({ sessionID: fork.id, question })
+      setText("")
+      setCaret(0)
+      setForcedSelection(undefined)
+      setDismissed(false)
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? `Could not start the side question (HTTP ${err.status})`
+          : "Could not start the side question",
+      )
+    } finally {
+      setStartingSideQuestion(false)
+    }
+  }
+
+  function closeSideQuestion() {
+    const current = sideQuestion
+    setSideQuestion(null)
+    if (current) void client.api.removeSession(current.sessionID).catch(() => {})
   }
 
   async function stop() {
@@ -252,6 +311,16 @@ export function Composer({
         />
       )}
 
+      {sideQuestion && (
+        <SideQuestionPanel
+          client={client}
+          sessionID={sideQuestion.sessionID}
+          question={sideQuestion.question}
+          connected={connected}
+          onClose={closeSideQuestion}
+        />
+      )}
+
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
@@ -276,11 +345,11 @@ export function Composer({
           </Pressable>
         ) : (
           <Pressable
-            style={[styles.action, (!text.trim() || sending) && styles.actionDisabled]}
-            disabled={!text.trim() || sending}
+            style={[styles.action, (!text.trim() || sending || startingSideQuestion) && styles.actionDisabled]}
+            disabled={!text.trim() || sending || startingSideQuestion}
             onPress={() => void send()}
           >
-            <Text style={styles.actionText}>Send</Text>
+            <Text style={styles.actionText}>{startingSideQuestion ? "Starting…" : "Send"}</Text>
           </Pressable>
         )}
       </View>

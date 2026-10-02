@@ -219,4 +219,22 @@ describe("Composer", () => {
       { agent: undefined, model: undefined },
     )
   })
+
+  it("runs /btw in a forked session and discards it on close", async () => {
+    const { client } = await setup()
+
+    await fireEvent.changeText(await screen.findByPlaceholderText("Write a message…"), "/btw what changed?")
+    await fireEvent.press(screen.getByText("Send"))
+
+    expect(client.api.forkSession).toHaveBeenCalledWith("s1")
+    expect(client.api.prompt).toHaveBeenCalledWith("fork_1", {
+      text: "what changed?",
+      agent: "build",
+      model: { providerID: "test", id: "test-model" },
+    })
+    expect(await screen.findByText("Side question")).toBeOnTheScreen()
+
+    await fireEvent.press(screen.getByText("Close"))
+    expect(client.api.removeSession).toHaveBeenCalledWith("fork_1")
+  })
 })

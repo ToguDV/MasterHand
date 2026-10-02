@@ -51,3 +51,19 @@ test("suggests and inserts an argument from the command description", async ({ p
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page.getByText("Review the changes: commit")).toBeVisible()
 })
+
+test("/btw answers a side question in a temporary session", async ({ page }) => {
+  await login(page)
+  await addWorkspace(page)
+  await page.getByRole("button", { name: "+ New" }).click()
+
+  const composer = page.getByPlaceholder("Write a message…")
+  await composer.fill("/btw what is this?")
+  await page.getByRole("button", { name: "Send" }).click()
+
+  await expect(page.getByText("Side question")).toBeVisible()
+  await expect(page.getByText("Side answer to: what is this?")).toBeVisible()
+
+  await page.getByRole("button", { name: "Close" }).click()
+  await expect(page.getByText("Side question")).toBeHidden()
+})

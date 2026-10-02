@@ -399,6 +399,33 @@ describe("commands", () => {
   })
 })
 
+describe("side question forks", () => {
+  it("forks a session and returns the new session", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ data: { id: "ses_fork" } }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.forkSession("ses_1")).toEqual({ id: "ses_fork" })
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/api/session/ses_1/fork")
+  })
+
+  it("forks before a message when asked", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ data: { id: "ses_fork" } }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.forkSession("ses_1", "msg_1")
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ before: "msg_1" })
+  })
+
+  it("deletes a session to discard the fork", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => new Response(null, { status: 204 }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.removeSession("ses_fork")
+    expect(calls[0]?.init?.method).toBe("DELETE")
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/api/session/ses_fork")
+  })
+})
+
 describe("opencode session operations", () => {
   it("aborts a session and unwraps the interrupted flag", async () => {
     const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ interrupted: true }))
