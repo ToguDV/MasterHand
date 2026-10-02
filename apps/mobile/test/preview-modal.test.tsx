@@ -31,7 +31,10 @@ describe("PreviewModal", () => {
     await setup(client)
 
     expect(await screen.findByText("Start")).toBeOnTheScreen()
-    expect(screen.getByText(/port 3000/)).toBeOnTheScreen()
+    // The placeholder port comes from the status query; wait for it instead of
+    // racing the async resolution (Start renders as soon as `unavailable` is
+    // false, which is also true before the status arrives).
+    expect(await screen.findByText(/port 3000/)).toBeOnTheScreen()
   })
 
   it("starts the tunnel and renders the WebView", async () => {
