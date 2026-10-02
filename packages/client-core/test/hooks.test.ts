@@ -49,6 +49,8 @@ describe("queryKeys", () => {
     expect(queryKeys.sessionsFor(null)).toEqual(["sessions", null])
     expect(queryKeys.directories("ws_1")).toEqual(["directories", "ws_1"])
     expect(queryKeys.directories()).toEqual(["directories", null])
+    expect(queryKeys.commands("/app")).toEqual(["commands", "/app"])
+    expect(queryKeys.commands()).toEqual(["commands", null])
     expect(queryKeys.preview("ses_1")).toEqual(["preview", "ses_1"])
   })
 })
@@ -78,13 +80,14 @@ describe("createEventHandler", () => {
     const handler = createEventHandler(qc, { onServerConnected })
     emit(handler, "server.connected", {})
     expect(onServerConnected).toHaveBeenCalledTimes(1)
-    expect(invalidate).toHaveBeenCalledTimes(6)
+    expect(invalidate).toHaveBeenCalledTimes(7)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["messages"] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.statuses })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["directories"] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["commands"] })
   })
 
   it("coalesces catalog refreshes when opencode hot-reloads them", () => {
@@ -92,20 +95,21 @@ describe("createEventHandler", () => {
     try {
       const { qc, invalidate } = makeQueryClient()
       const handler = createEventHandler(qc)
-      for (const type of ["agent.updated", "model.updated", "provider.updated", "models-dev.refreshed"]) {
+      for (const type of ["agent.updated", "model.updated", "provider.updated", "command.updated", "config.updated", "models-dev.refreshed"]) {
         emit(handler, type, {})
       }
       expect(invalidate).not.toHaveBeenCalled()
       vi.advanceTimersByTime(250)
-      expect(invalidate).toHaveBeenCalledTimes(2)
+      expect(invalidate).toHaveBeenCalledTimes(3)
       expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["commands"] })
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it.each(["agent.updated", "model.updated", "provider.updated", "models-dev.refreshed"])(
+  it.each(["agent.updated", "model.updated", "provider.updated", "command.updated", "config.updated", "models-dev.refreshed"])(
     "refreshes the catalogs once per %s event",
     (type) => {
       vi.useFakeTimers()
@@ -114,9 +118,10 @@ describe("createEventHandler", () => {
         const handler = createEventHandler(qc)
         emit(handler, type, {})
         vi.advanceTimersByTime(250)
-        expect(invalidate).toHaveBeenCalledTimes(2)
+        expect(invalidate).toHaveBeenCalledTimes(3)
         expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.agents })
         expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.models })
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: ["commands"] })
       } finally {
         vi.useRealTimers()
       }
@@ -136,7 +141,7 @@ describe("createEventHandler", () => {
       // the last event of the burst.
       expect(invalidate).not.toHaveBeenCalled()
       vi.advanceTimersByTime(50)
-      expect(invalidate).toHaveBeenCalledTimes(2)
+      expect(invalidate).toHaveBeenCalledTimes(3)
     } finally {
       vi.useRealTimers()
     }

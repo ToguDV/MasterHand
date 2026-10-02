@@ -26,6 +26,7 @@ export function ChatScreen({
   busy,
   connected,
   workspaceID,
+  workspacePath = null,
   isolation,
   autoAccept,
   onToggleAutoAccept,
@@ -39,6 +40,7 @@ export function ChatScreen({
   busy: boolean
   connected: boolean
   workspaceID: string | null
+  workspacePath?: string | null
   isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
@@ -159,6 +161,7 @@ export function ChatScreen({
         sessionID={sessionID}
         busy={busy}
         workspaceID={workspaceID}
+        directory={isolation?.worktreePath ?? workspacePath}
         autoAccept={autoAccept}
         onToggleAutoAccept={onToggleAutoAccept}
       />

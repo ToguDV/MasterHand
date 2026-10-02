@@ -25,6 +25,7 @@ export const queryKeys = {
   statuses: ["statuses"] as const,
   messages: (sessionID: string) => ["messages", sessionID] as const,
   agents: ["agents"] as const,
+  commands: (directory?: string | null) => ["commands", directory ?? null] as const,
   models: ["models"] as const,
   workspaces: ["workspaces"] as const,
   /** Session list scoped to a workspace; `queryKeys.sessions` stays the invalidation prefix. */
@@ -121,6 +122,18 @@ export function useAgents(client: Client) {
   return useQuery({ queryKey: queryKeys.agents, queryFn: () => client.api.agents(), staleTime: 5 * 60_000 })
 }
 
+/**
+ * Slash commands for a location (the session's directory). `directory` scopes
+ * project-local commands; without it opencode resolves its default location.
+ */
+export function useCommands(client: Client, directory?: string | null) {
+  return useQuery({
+    queryKey: queryKeys.commands(directory),
+    queryFn: () => client.api.commands(directory),
+    staleTime: 5 * 60_000,
+  })
+}
+
 export function useModels(client: Client) {
   return useQuery({ queryKey: queryKeys.models, queryFn: () => client.api.models(), staleTime: 5 * 60_000 })
 }
@@ -205,6 +218,7 @@ export function createEventHandler(
       catalogRefreshTimer = null
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents })
       void queryClient.invalidateQueries({ queryKey: queryKeys.models })
+      void queryClient.invalidateQueries({ queryKey: ["commands"] })
     }, 250)
   }
 
@@ -237,6 +251,8 @@ export function createEventHandler(
       case "agent.updated":
       case "model.updated":
       case "provider.updated":
+      case "command.updated":
+      case "config.updated":
       case "models-dev.refreshed":
         // opencode hot-reloaded its catalog (config edits, models.dev refresh).
         refreshCatalogs()
@@ -494,6 +510,7 @@ export function invalidateOnReconnect(queryClient: QueryClient): void {
   // manual reload.
   void queryClient.invalidateQueries({ queryKey: queryKeys.agents })
   void queryClient.invalidateQueries({ queryKey: queryKeys.models })
+  void queryClient.invalidateQueries({ queryKey: ["commands"] })
 }
 
 export interface UseEventStreamOptions {

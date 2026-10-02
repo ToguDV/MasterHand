@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react-native"
-import { ApiError, type AgentInfo, type ModelInfo, type ProviderInfo } from "@masterhand/client-core"
+import { ApiError, type AgentInfo, type ModelInfo, type ProviderInfo, type SlashCommand } from "@masterhand/client-core"
 import { Composer } from "../src/components/Composer"
 import { loadSessionPreferences } from "../src/storage"
 import { fakeClient, makeQueryClient, QueryWrapper } from "./support/render"
@@ -19,6 +19,8 @@ beforeEach(() => {
 const agents: AgentInfo[] = [
   { id: "build", name: "Build", mode: "primary" },
   { id: "explore", name: "Explore", mode: "primary" },
+  { id: "general", name: "General", mode: "subagent" },
+  { id: "tester", name: "Tester", mode: "subagent" },
 ] as unknown as AgentInfo[]
 
 const providers: ProviderInfo[] = [{ id: "test", name: "Test" }] as unknown as ProviderInfo[]
@@ -28,9 +30,13 @@ const models: ModelInfo[] = [
   { id: "alpha", providerID: "test", name: "Alpha", variants: [], enabled: true },
 ] as unknown as ModelInfo[]
 
-async function setup(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
+async function setup(
+  props: Partial<React.ComponentProps<typeof Composer>> = {},
+  options: { commands?: SlashCommand[] } = {},
+) {
   const client = fakeClient()
   client.api.agents.mockResolvedValue(agents)
+  client.api.commands.mockResolvedValue(options.commands ?? [])
   client.api.models.mockResolvedValue({ models, providers, defaultModel: models[0] })
   await render(
     <Composer
@@ -165,5 +171,52 @@ describe("Composer", () => {
 
     expect(await screen.findByText("Explore")).toBeOnTheScreen()
     expect(screen.getByText("Test · Alpha")).toBeOnTheScreen()
+  })
+
+  it("opens the command list on / and runs the selected command", async () => {
+    const commands: SlashCommand[] = [
+      {
+        name: "review",
+        description: "review changes [commit|branch|pr]",
+        arguments: [{ position: 1, freeForm: false, suggestions: ["commit", "branch", "pr"] }],
+      },
+    ]
+    const { client } = await setup({}, { commands })
+
+    await fireEvent.changeText(await screen.findByPlaceholderText("Write a message…"), "/rev")
+    await fireEvent.press(await screen.findByText("/review"))
+
+    // Argument suggestions come from the command's own description.
+    await fireEvent.press(await screen.findByText("commit"))
+    expect(screen.getByPlaceholderText("Write a message…").props.value).toBe("/review commit ")
+
+    await fireEvent.press(screen.getByText("Send"))
+
+    expect(client.api.runCommand).toHaveBeenCalledWith(
+      "s1",
+      { name: "review", text: "commit", agent: "build", model: { providerID: "test", id: "test-model" } },
+      { agent: undefined, model: undefined },
+    )
+    expect(client.api.prompt).not.toHaveBeenCalled()
+  })
+
+  it("opens the subagent list on @ and attaches the mention", async () => {
+    const { client } = await setup()
+
+    await fireEvent.changeText(await screen.findByPlaceholderText("Write a message…"), "@gen")
+    await fireEvent.press(await screen.findByText("@general"))
+    await fireEvent.changeText(screen.getByPlaceholderText("Write a message…"), "@general hello")
+    await fireEvent.press(screen.getByText("Send"))
+
+    expect(client.api.prompt).toHaveBeenCalledWith(
+      "s1",
+      {
+        text: "@general hello",
+        agent: "build",
+        model: { providerID: "test", id: "test-model" },
+        agents: [{ name: "general", mention: { start: 0, end: 8, text: "@general" } }],
+      },
+      { agent: undefined, model: undefined },
+    )
   })
 })

@@ -45,6 +45,7 @@ export {
   queryKeys,
   useAgents,
   useBffStatus,
+  useCommands,
   useEventStream,
   useMessages,
   useModels,
@@ -56,5 +57,19 @@ export {
   type EventHandlerCallbacks,
   type UseEventStreamOptions,
 } from "./hooks"
+export {
+  argumentSuggestions,
+  buildComposerPopover,
+  collectAgentMentions,
+  commandArgumentHint,
+  composerTrigger,
+  filterAgentMentions,
+  filterCommands,
+  mentionableAgents,
+  splitCommand,
+  type ComposerPopover,
+  type ComposerPopoverItem,
+  type ComposerTrigger,
+} from "./commands"
 export { filterSessions, rootSessions, type SessionFilter } from "./sessions"
 export { reconcilePermissions } from "./permissions"

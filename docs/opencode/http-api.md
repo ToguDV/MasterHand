@@ -34,6 +34,7 @@ Everything lives under `/api/*`. The BFF proxy strips its own `/api/oc` prefix, 
 | `GET` | `/api/session/active` | Session ids running right now (`{ data: { [sessionID]: { type: "running" } } }`) |
 | `GET` | `/api/session/:id/message` | History. Query: `limit`, `order` (`asc`/`desc`), `cursor`, `type`; responds `{ data: Session.Message.Info[], cursor }` |
 | `POST` | `/api/session/:id/prompt` | Send a prompt. Body `{ text, files?, agents?, skills?, metadata?, delivery?, resume? }`; responds `{ data: Session.Inbox.User }` |
+| `POST` | `/api/session/:id/command` | Run a slash command. Body `{ name, text, agents?, ... }`; the argument text is the rest of the message. `204`; `404 CommandNotFoundError` for an unknown command |
 | `POST` | `/api/session/:id/interrupt` | Stop the running turn; responds `{ interrupted: boolean }` |
 | `POST` | `/api/session/:id/agent` | Switch agent; body `{ agent: string }`; `204` |
 | `POST` | `/api/session/:id/model` | Switch model; body `{ model: { id, providerID, variant? } }`; `204` |
@@ -58,7 +59,8 @@ Everything lives under `/api/*`. The BFF proxy strips its own `/api/oc` prefix, 
 | `GET` | `/api/model` | Model catalog (`{ location, data: Model.Info[] }`); each model has `id`, `providerID`, `name`, `variants: Model.Variant[]` and `enabled` |
 | `GET` | `/api/model/default` | Server default model (`{ location, data: Model.Info \| null }`) |
 | `GET` | `/api/provider` | Providers (`{ location, data: Provider.Info[] }`), no nested models |
-| `GET` | `/api/config` | Configuration entries (not used by MasterHand) |
+| `GET` | `/api/command` | Slash commands (`{ location, data: Command.Info[] }`); each item only has `name` and `description` — no argument metadata |
+| `GET` | `/api/config` | Configuration documents (`ConfigEntry[]`). Used by the BFF to read each command's `template` and derive argument hints (`$ARGUMENTS`, `$1..$N`); the raw config is never sent to clients |
 
 ## Location (working directory) model
 

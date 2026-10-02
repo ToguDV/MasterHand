@@ -23,6 +23,7 @@ export function ChatView({
   busy,
   connected,
   workspaceID,
+  workspacePath,
   isolation,
   autoAccept,
   onToggleAutoAccept,
@@ -32,6 +33,7 @@ export function ChatView({
   busy: boolean
   connected: boolean
   workspaceID: string | null
+  workspacePath: string | null
   isolation?: SessionIsolation
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
@@ -181,6 +183,7 @@ export function ChatView({
         sessionID={sessionID}
         busy={busy}
         workspaceID={workspaceID}
+        directory={isolation?.worktreePath ?? workspacePath}
         autoAccept={autoAccept}
         onToggleAutoAccept={onToggleAutoAccept}
       />

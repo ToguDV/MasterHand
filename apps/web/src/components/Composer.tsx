@@ -1,18 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ApiError,
+  buildComposerPopover,
+  collectAgentMentions,
+  composerTrigger,
   defaultModelValue,
   flattenModels,
+  mentionableAgents,
   parseModel,
   recentModelValue,
   selectableAgents,
   sessionModelValue,
+  splitCommand,
   useAgents,
+  useCommands,
   useModels,
   useSessions,
   variantLabel,
+  type ComposerPopover,
+  type ComposerTrigger,
 } from "@masterhand/client-core"
 import { client } from "../client"
+import { ComposerSuggestions } from "./ComposerSuggestions"
 import { SearchSelect } from "./SearchSelect"
 
 const PREFERENCES_STORAGE_KEY = "masterhand.sessionPreferences"
@@ -54,20 +63,25 @@ export function Composer({
   sessionID,
   busy,
   workspaceID,
+  directory = null,
   autoAccept,
   onToggleAutoAccept,
 }: {
   sessionID: string
   busy: boolean
   workspaceID: string | null
+  directory?: string | null
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
 }) {
   const agentsQuery = useAgents(client)
   const modelsQuery = useModels(client)
   const sessionsQuery = useSessions(client, true, 10_000, workspaceID)
+  const commandsQuery = useCommands(client, directory)
 
   const agents = useMemo(() => selectableAgents(agentsQuery.data ?? []), [agentsQuery.data])
+  const subagents = useMemo(() => mentionableAgents(agentsQuery.data ?? []), [agentsQuery.data])
+  const commands = commandsQuery.data ?? []
 
   const catalog = modelsQuery.data
   const modelOptions = useMemo(
@@ -91,6 +105,13 @@ export function Composer({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const modelTouched = useRef(Boolean(stored.model))
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const pendingCaret = useRef<number | null>(null)
+  const [caret, setCaret] = useState(0)
+  const [caretTick, setCaretTick] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [dismissed, setDismissed] = useState(false)
 
   const variants = useMemo(
     () => modelOptions.find((option) => option.value === model)?.variants ?? [],
@@ -125,6 +146,59 @@ export function Composer({
     writePreferences(sessionID, { agent, model, variant })
   }, [sessionID, agent, model, variant])
 
+  // The active trigger is derived from the text and caret, so it stays in sync
+  // with edits and cursor moves instead of being a separate mode to maintain.
+  const trigger = useMemo(
+    () => (dismissed ? null : composerTrigger(text, caret)),
+    [text, caret, dismissed],
+  )
+
+  const popover = useMemo<ComposerPopover | null>(
+    () => (trigger ? buildComposerPopover(trigger, commands, subagents) : null),
+    [trigger, commands, subagents],
+  )
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [popover])
+
+  // Programmatic edits (suggestion selection) must move the caret after React
+  // commits the new value.
+  useEffect(() => {
+    if (caretTick === 0) return
+    const position = pendingCaret.current
+    if (position === null) return
+    pendingCaret.current = null
+    const element = textareaRef.current
+    if (!element) return
+    element.focus()
+    element.setSelectionRange(position, position)
+  }, [caretTick])
+
+  function moveCaret(position: number): void {
+    setCaret(position)
+  }
+
+  function applyReplacement(active: ComposerTrigger, replacement: string): void {
+    // Collapse a space that already followed the trigger, so selecting a
+    // suggestion never leaves a double space.
+    const end = replacement.endsWith(" ") && text[active.end] === " " ? active.end + 1 : active.end
+    const next = text.slice(0, active.start) + replacement + text.slice(end)
+    const position = active.start + replacement.length
+    pendingCaret.current = position
+    setText(next)
+    setCaret(position)
+    setCaretTick((tick) => tick + 1)
+    setDismissed(false)
+  }
+
+  function selectSuggestion(index: number): void {
+    if (!popover || !trigger) return
+    const item = popover.items[Math.min(index, popover.items.length - 1)]
+    if (!item) return
+    applyReplacement(trigger, item.replacement)
+  }
+
   async function send() {
     const trimmed = text.trim()
     if (!trimmed || sending) return
@@ -132,16 +206,30 @@ export function Composer({
     setError(null)
     try {
       const modelValue = model ? parseModel(model, variant || undefined) : undefined
-      await client.api.prompt(
-        sessionID,
-        {
-          text: trimmed,
-          ...(agent ? { agent } : {}),
-          ...(modelValue ? { model: modelValue } : {}),
-        },
-        { agent: session?.agent, model: session?.model },
-      )
+      const command = splitCommand(trimmed, commands)
+      const mentionText = command ? command.text : trimmed
+      const mentions = collectAgentMentions(mentionText, subagents)
+      const context = {
+        ...(agent ? { agent } : {}),
+        ...(modelValue ? { model: modelValue } : {}),
+        ...(mentions.length > 0 ? { agents: mentions } : {}),
+      }
+      if (command) {
+        await client.api.runCommand(
+          sessionID,
+          { name: command.command.name, text: command.text, ...context },
+          { agent: session?.agent, model: session?.model },
+        )
+      } else {
+        await client.api.prompt(
+          sessionID,
+          { text: trimmed, ...context },
+          { agent: session?.agent, model: session?.model },
+        )
+      }
       setText("")
+      setCaret(0)
+      setDismissed(false)
     } catch (err) {
       setError(err instanceof ApiError ? `Could not send (HTTP ${err.status})` : "Could not send")
     } finally {
@@ -205,38 +293,96 @@ export function Composer({
           </button>
         </div>
 
-        <div className="flex items-end gap-2">
-          <textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                void send()
-              }
-            }}
-            rows={1}
-            placeholder="Write a message…"
-            className="field-sizing-content max-h-40 min-h-11 flex-1 resize-none rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-[15px] outline-none focus:border-indigo-500"
-          />
-          {busy ? (
-            <button
-              type="button"
-              onClick={() => void stop()}
-              className="h-11 shrink-0 rounded-xl border border-red-500/40 bg-red-500/10 px-4 text-sm font-semibold text-red-300 hover:bg-red-500/20"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={!text.trim() || sending}
-              className="h-11 shrink-0 rounded-xl bg-indigo-600 px-4 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
-            >
-              Send
-            </button>
+        <div className="relative">
+          {popover && (
+            <ComposerSuggestions
+              id="composer-suggestions"
+              title={popover.title}
+              hint={popover.hint}
+              items={popover.items}
+              activeIndex={Math.min(activeIndex, Math.max(0, popover.items.length - 1))}
+              emptyLabel={popover.emptyLabel}
+              onActive={setActiveIndex}
+              onSelect={selectSuggestion}
+            />
           )}
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              role="combobox"
+              aria-expanded={Boolean(popover)}
+              aria-controls={popover ? "composer-suggestions" : undefined}
+              aria-autocomplete="list"
+              aria-activedescendant={
+                popover && popover.items.length > 0
+                  ? `composer-suggestions-${popover.items[Math.min(activeIndex, popover.items.length - 1)]?.id}`
+                  : undefined
+              }
+              onChange={(event) => {
+                setText(event.target.value)
+                setCaret(event.target.selectionStart ?? event.target.value.length)
+                setDismissed(false)
+              }}
+              onKeyDown={(event) => {
+                if (popover && popover.items.length > 0) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault()
+                    setActiveIndex((index) => (index + 1) % popover.items.length)
+                    return
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault()
+                    setActiveIndex((index) => (index - 1 + popover.items.length) % popover.items.length)
+                    return
+                  }
+                  if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+                    event.preventDefault()
+                    selectSuggestion(activeIndex)
+                    return
+                  }
+                }
+                if (event.key === "Escape" && popover) {
+                  event.preventDefault()
+                  setDismissed(true)
+                  return
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  void send()
+                }
+              }}
+              onClick={(event) => {
+                setDismissed(false)
+                moveCaret(event.currentTarget.selectionStart ?? 0)
+              }}
+              onKeyUp={(event) => {
+                if (event.key !== "Escape") setDismissed(false)
+                moveCaret(event.currentTarget.selectionStart ?? 0)
+              }}
+              rows={1}
+              placeholder="Write a message…"
+              className="field-sizing-content max-h-40 min-h-11 flex-1 resize-none rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-[15px] outline-none focus:border-indigo-500"
+            />
+            {busy ? (
+              <button
+                type="button"
+                onClick={() => void stop()}
+                className="h-11 shrink-0 rounded-xl border border-red-500/40 bg-red-500/10 px-4 text-sm font-semibold text-red-300 hover:bg-red-500/20"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void send()}
+                disabled={!text.trim() || sending}
+                className="h-11 shrink-0 rounded-xl bg-indigo-600 px-4 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
+              >
+                Send
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <p className="text-xs text-red-400">{error}</p>}

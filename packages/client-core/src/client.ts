@@ -14,8 +14,10 @@ import type {
   PreviewStatus,
   PromptContext,
   PromptInput,
+  RunCommandInput,
   Session,
   SessionStatuses,
+  SlashCommand,
   WorkspaceRecord,
 } from "./types"
 import { toChatMessage } from "./chat"
@@ -72,6 +74,8 @@ export interface Client {
      * first only if they differ (opencode records a message per switch).
      */
     prompt(sessionID: string, input: PromptInput, current?: PromptContext): Promise<void>
+    /** Runs a slash command (`/name args`) with the same agent/model switching. */
+    runCommand(sessionID: string, input: RunCommandInput, current?: PromptContext): Promise<void>
     /** Interrupts the running turn; returns whether anything was interrupted. */
     abortSession(sessionID: string): Promise<boolean>
     /** Pending permission requests, optionally scoped to a location. */
@@ -82,6 +86,8 @@ export interface Client {
       response: PermissionResponse,
     ): Promise<void>
     agents(): Promise<AgentInfo[]>
+    /** Slash commands for a location, with deterministic argument hints. */
+    commands(directory?: string | null): Promise<SlashCommand[]>
     /** Models, providers and server default model for the composer selectors. */
     models(): Promise<ModelsCatalog>
     statuses(): Promise<SessionStatuses>
@@ -202,6 +208,24 @@ export function createClient(options: ClientOptions = {}): Client {
     return messages.reverse()
   }
 
+  /**
+   * Switches the session's agent/model only when they differ from `current`:
+   * every switch records a `*-switched` message in the history.
+   */
+  async function applyContext(
+    sessionID: string,
+    agent: string | undefined,
+    model: PromptContext["model"],
+    current?: PromptContext,
+  ): Promise<void> {
+    if (agent && agent !== current?.agent) {
+      await opencode.session.switchAgent({ sessionID, agent })
+    }
+    if (model && !sameModel(model, current?.model)) {
+      await opencode.session.switchModel({ sessionID, model })
+    }
+  }
+
   return {
     baseUrl,
     auth: {
@@ -245,17 +269,25 @@ export function createClient(options: ClientOptions = {}): Client {
           ).then((response) => response.directories),
       },
       messages: (sessionID) => listAllMessages(sessionID),
-      prompt: async (sessionID, input, current) => {
-        await opencodeRequest(async () => {
-          if (input.agent && input.agent !== current?.agent) {
-            await opencode.session.switchAgent({ sessionID, agent: input.agent })
-          }
-          if (input.model && !sameModel(input.model, current?.model)) {
-            await opencode.session.switchModel({ sessionID, model: input.model })
-          }
-          await opencode.session.prompt({ sessionID, text: input.text })
-        })
-      },
+      prompt: (sessionID, input, current) =>
+        opencodeRequest(async () => {
+          await applyContext(sessionID, input.agent, input.model, current)
+          await opencode.session.prompt({
+            sessionID,
+            text: input.text,
+            ...(input.agents && input.agents.length > 0 ? { agents: input.agents } : {}),
+          })
+        }),
+      runCommand: (sessionID, input, current) =>
+        opencodeRequest(async () => {
+          await applyContext(sessionID, input.agent, input.model, current)
+          await opencode.session.command({
+            sessionID,
+            name: input.name,
+            text: input.text,
+            ...(input.agents && input.agents.length > 0 ? { agents: input.agents } : {}),
+          })
+        }),
       abortSession: (sessionID) =>
         opencodeRequest(() =>
           opencode.session.interrupt({ sessionID }).then((response) => response.interrupted),
@@ -274,6 +306,10 @@ export function createClient(options: ClientOptions = {}): Client {
         opencodeRequest(() =>
           opencode.agent.list().then((response) => response.data as AgentInfo[]),
         ),
+      commands: (directory) =>
+        request<{ commands: SlashCommand[] }>(
+          `/api/commands${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
+        ).then((response) => response.commands),
       models: () =>
         opencodeRequest(async () => {
           const [models, providers, defaultModel] = await Promise.all([
