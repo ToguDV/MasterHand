@@ -111,11 +111,13 @@ export function ChatView({
           )}
         </div>
       </div>
-      {usage.cost > 0 && (
+      {(usage.cost > 0 || usage.input > 0 || usage.output > 0) && (
         <div className="px-3 pt-2 md:px-6">
           <p className="mx-auto w-full max-w-3xl text-right text-xs text-zinc-600">
             Session · ${usage.cost.toFixed(4)}
-            {usage.tokens > 0 ? ` · ${usage.tokens} tok` : ""}
+            {usage.input > 0 ? ` · ${usage.input} in` : ""}
+            {usage.output > 0 ? ` · ${usage.output} out` : ""}
+            {usage.input > 0 || usage.output > 0 ? " tok" : ""}
           </p>
         </div>
       )}

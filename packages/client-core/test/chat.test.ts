@@ -31,8 +31,8 @@ import {
 
 const SESSION = "ses_1"
 
-function tokens(output: number): TokenUsageInfo {
-  return { input: 0, output, reasoning: 0, cache: { read: 0, write: 0 } }
+function tokens(output: number, input = 0): TokenUsageInfo {
+  return { input, output, reasoning: 0, cache: { read: 0, write: 0 } }
 }
 
 function userMessage(id: string, text = "hi", created = 1): SessionMessageUser {
@@ -532,18 +532,18 @@ describe("setMessageCost", () => {
 })
 
 describe("sessionUsage", () => {
-  it("totals cost and output tokens across assistant messages only", () => {
+  it("totals cost, input and output tokens across assistant messages only", () => {
     const list: ChatMessage[] = [
       chatMessage("msg_u", [], "user"),
-      { ...chatMessage("msg_a1"), info: { ...chatMessage("msg_a1").info, cost: 0.5, tokens: tokens(100) } },
-      { ...chatMessage("msg_a2"), info: { ...chatMessage("msg_a2").info, cost: 0.25, tokens: tokens(50) } },
+      { ...chatMessage("msg_a1"), info: { ...chatMessage("msg_a1").info, cost: 0.5, tokens: tokens(100, 1000) } },
+      { ...chatMessage("msg_a2"), info: { ...chatMessage("msg_a2").info, cost: 0.25, tokens: tokens(50, 200) } },
     ]
-    expect(sessionUsage(list)).toEqual({ cost: 0.75, tokens: 150 })
+    expect(sessionUsage(list)).toEqual({ cost: 0.75, input: 1200, output: 150 })
   })
 
   it("tolerates assistant messages without usage", () => {
-    expect(sessionUsage([chatMessage("msg_a")])).toEqual({ cost: 0, tokens: 0 })
-    expect(sessionUsage([])).toEqual({ cost: 0, tokens: 0 })
+    expect(sessionUsage([chatMessage("msg_a")])).toEqual({ cost: 0, input: 0, output: 0 })
+    expect(sessionUsage([])).toEqual({ cost: 0, input: 0, output: 0 })
   })
 })
 

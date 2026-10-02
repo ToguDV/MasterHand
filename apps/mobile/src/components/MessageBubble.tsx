@@ -226,7 +226,9 @@ export function MessageBubble({
         <Text style={styles.caption}>
           {info.modelID}
           {(info.cost ?? 0) > 0 ? ` · $${(info.cost ?? 0).toFixed(4)}` : ""}
-          {(info.tokens?.output ?? 0) > 0 ? ` · ${info.tokens?.output} tok` : ""}
+          {(info.tokens?.input ?? 0) > 0 ? ` · ${info.tokens?.input} in` : ""}
+          {(info.tokens?.output ?? 0) > 0 ? ` · ${info.tokens?.output} out` : ""}
+          {(info.tokens?.input ?? 0) > 0 || (info.tokens?.output ?? 0) > 0 ? " tok" : ""}
         </Text>
       ) : null}
     </View>

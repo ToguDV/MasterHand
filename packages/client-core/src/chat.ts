@@ -365,19 +365,23 @@ export function setMessageCost(
 }
 
 export interface SessionUsage {
+  /** Total cost reported by opencode (already includes input, output and cache). */
   cost: number
-  tokens: number
+  input: number
+  output: number
 }
 
 export function sessionUsage(messages: ChatMessage[]): SessionUsage {
   let cost = 0
-  let tokens = 0
+  let input = 0
+  let output = 0
   for (const message of messages) {
     if (message.info.role !== "assistant") continue
     cost += message.info.cost ?? 0
-    tokens += message.info.tokens?.output ?? 0
+    input += message.info.tokens?.input ?? 0
+    output += message.info.tokens?.output ?? 0
   }
-  return { cost, tokens }
+  return { cost, input, output }
 }
 
 export function toolTitle(part: ChatToolPart): string {
