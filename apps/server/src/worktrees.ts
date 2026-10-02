@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync } from "node:fs"
 import { dirname, resolve, sep } from "node:path"
 import type { Store } from "./store.js"
 
@@ -30,8 +30,9 @@ export interface WorktreeManagerOptions {
 }
 
 export interface WorktreeManager {
-  isGitRepo(path: string): boolean
-  /** Initializes the repo (and an empty first commit) when it is not one yet. */
+  /** True when `path` is the root of its own git work tree, not merely inside one. */
+  isRepoRoot(path: string): boolean
+  /** Initializes `path` as its own repo (and an empty first commit) when it is not one yet. */
   ensureRepo(path: string): void
   /** Current branch name, or a short SHA when HEAD is detached. */
   headBranch(path: string): string
@@ -87,13 +88,20 @@ export function createWorktreeManager(options: WorktreeManagerOptions = {}): Wor
   const authorArgs = ["-c", `user.name=${userName}`, "-c", `user.email=${userEmail}`]
 
   return {
-    isGitRepo(path) {
-      const result = git(["rev-parse", "--is-inside-work-tree"], path)
-      return result.status === 0 && result.stdout.trim() === "true"
+    isRepoRoot(path) {
+      const result = git(["rev-parse", "--show-toplevel"], path)
+      if (result.status !== 0) return false
+      const top = result.stdout.trim()
+      if (!top) return false
+      try {
+        return realpathSync(top) === realpathSync(path)
+      } catch {
+        return resolve(top) === resolve(path)
+      }
     },
 
     ensureRepo(path) {
-      if (!this.isGitRepo(path)) {
+      if (!this.isRepoRoot(path)) {
         gitOrThrow(["init"], path, "git_init_failed")
       }
       const head = git(["rev-parse", "--verify", "HEAD"], path)
@@ -336,7 +344,7 @@ export function reconcileWorktrees(
     store.listIsolatedSessions().map((record) => resolve(record.path)),
   )
   for (const workspace of store.listWorkspaces()) {
-    if (!manager.isGitRepo(workspace.path)) continue
+    if (!manager.isRepoRoot(workspace.path)) continue
     for (const entry of manager.list(workspace.path)) {
       const path = resolve(entry.path)
       if (path === resolve(workspace.path)) continue

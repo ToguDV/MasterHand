@@ -33,10 +33,12 @@ import {
 } from "./worktrees.js"
 import {
   createWorkspaceDir,
+  externalWriteGuardRules,
   isInsideRoot,
   normalizeWorkspaceSlug,
   removeWorkspaceDir,
   workspacePath,
+  workspaceSystemPrompt,
 } from "./workspaces.js"
 
 export interface AppDeps {
@@ -175,6 +177,25 @@ export function createApp(deps: AppDeps): Hono {
   }
 
   /**
+   * Writes a session instruction entry: opencode includes it in the model's
+   * system context on every turn. Best effort — a failure must never block
+   * session creation or prompting.
+   */
+  async function writeSessionInstruction(sessionID: string, key: string, value: string): Promise<void> {
+    try {
+      const response = await callOpencode(
+        `/api/experimental/session/${encodeURIComponent(sessionID)}/instructions/entries/${encodeURIComponent(key)}`,
+        { method: "PUT", body: { value } },
+      )
+      if (!response.ok) {
+        console.warn(`[instructions] could not store ${key} for ${sessionID} (HTTP ${response.status})`)
+      }
+    } catch {
+      // opencode unreachable: the session works, just without the instruction
+    }
+  }
+
+  /**
    * Records the reserved preview port as a session instruction entry so the
    * agent binds its web server to it. Best effort: previews must never block
    * session creation or prompting.
@@ -187,20 +208,57 @@ export function createApp(deps: AppDeps): Hono {
     } catch {
       return
     }
+    await writeSessionInstruction(sessionID, "masterhand.preview", previewSystemPrompt(port))
+  }
+
+  /**
+   * Pins the session to the exact directory MasterHand assigned it (its own
+   * project root), so the agent never mistakes the MasterHand server repo — or
+   * a sibling workspace — for its own. A distinct instruction key keeps it
+   * independent from `masterhand.preview`.
+   */
+  async function ensureWorkspaceInstruction(sessionID: string, directory: string): Promise<void> {
+    await writeSessionInstruction(sessionID, "masterhand.workspace", workspaceSystemPrompt(directory))
+  }
+
+  /**
+   * Blocks writes outside the session directory while keeping reads allowed, as
+   * defense in depth on top of the workspace instruction. Best effort: it must
+   * never block session creation.
+   */
+  async function ensureExternalWriteGuard(sessionID: string): Promise<void> {
     try {
-      const response = await callOpencode(
-        `/api/experimental/session/${encodeURIComponent(sessionID)}/instructions/entries/masterhand.preview`,
-        { method: "PUT", body: { value: previewSystemPrompt(port) } },
-      )
+      const response = await callOpencode(`/api/session/${encodeURIComponent(sessionID)}`, {
+        method: "PATCH",
+        body: { permissions: externalWriteGuardRules() },
+      })
       if (!response.ok) {
-        // Never block session creation on this: the prompt also reaches the
-        // agent through the preview route, which retries the entry.
-        console.warn(
-          `[preview] could not store the masterhand.preview entry for ${sessionID} (HTTP ${response.status})`,
-        )
+        console.warn(`[workspace] could not set the external write guard for ${sessionID} (HTTP ${response.status})`)
       }
     } catch {
-      // opencode unreachable: the preview will simply not know its port yet
+      // opencode unreachable: the workspace instruction still applies
+    }
+  }
+
+  /** Applies the workspace guardrails to a freshly created session. */
+  async function ensureWorkspaceGuard(sessionID: string, directory: string): Promise<void> {
+    await ensureWorkspaceInstruction(sessionID, directory)
+    await ensureExternalWriteGuard(sessionID)
+  }
+
+  /**
+   * Makes `path` its own git root so opencode resolves its project root (and
+   * `/init`) to the workspace instead of an ancestor repo such as MasterHand.
+   * Best effort at session creation: the instruction and permission guards still
+   * apply if git is unavailable.
+   */
+  function ensureWorkspaceRepo(path: string): void {
+    try {
+      worktrees.ensureRepo(path)
+    } catch (error) {
+      console.warn(
+        `[workspace] could not initialize a git repo at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 
@@ -404,6 +462,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     createDir(path)
+    ensureWorkspaceRepo(path)
     const workspace = { id: randomUUID(), name: result.slug, path, createdAt: Date.now() }
     deps.store.createWorkspace(workspace)
     return c.json({ workspace }, 201)
@@ -486,6 +545,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     if (body.isolated !== true) {
+      ensureWorkspaceRepo(workspace.path)
       let response: Response
       try {
         response = await callOpencode("/api/session", {
@@ -499,6 +559,7 @@ export function createApp(deps: AppDeps): Hono {
       const session = ((await response.json()) as { data: OpencodeSession }).data
       invalidateSessionsCache()
       await ensurePreviewInstruction(session.id)
+      await ensureWorkspaceGuard(session.id, workspace.path)
       return c.json({ session, isolation: null }, 201)
     }
 
@@ -528,6 +589,7 @@ export function createApp(deps: AppDeps): Hono {
       sessionID = session.id
       invalidateSessionsCache()
       await ensurePreviewInstruction(session.id)
+      await ensureWorkspaceGuard(session.id, path)
 
       const record: IsolatedSessionRecord = {
         sessionID: session.id,

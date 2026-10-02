@@ -13,7 +13,11 @@ interface OpencodeCall {
   directory: string | null
   query: URLSearchParams
   body?: string
-  parsedBody?: { location?: { directory?: string }; value?: string }
+  parsedBody?: {
+    location?: { directory?: string }
+    value?: string
+    permissions?: Array<{ action: string; resource: string; effect: string }>
+  }
 }
 
 /** Minimal opencode v2 stand-in for the session endpoints the BFF calls. */
@@ -53,6 +57,9 @@ function createOpencodeMock(options: { pageSize?: number } = {}) {
       return Response.json({ data: session })
     }
     if (method === "PUT" && url.pathname.includes("/instructions/entries/")) {
+      return new Response(null, { status: 204 })
+    }
+    if (method === "PATCH" && url.pathname.startsWith("/api/session/")) {
       return new Response(null, { status: 204 })
     }
     if (method === "DELETE" && url.pathname.startsWith("/api/session/")) {
@@ -105,8 +112,27 @@ describe("POST /api/workspaces/:id/sessions", () => {
       expect(creation?.parsedBody).toEqual({ location: { directory: workspace.path } })
       expect(creation?.directory).toBe(workspace.path)
       expect(creation?.query.get("directory")).toBeNull()
-      expect(worktrees.calls).toHaveLength(0)
+      // The workspace is made its own git root so opencode resolves /init (and
+      // the project root) to the workspace, never to an ancestor repo.
+      expect(worktrees.calls).toContain(`ensure:${workspace.path}`)
+      expect(worktrees.calls.some((call) => call.startsWith("create:"))).toBe(false)
       expect(app.store.getIsolatedSession(body.session.id)).toBeNull()
+
+      const instruction = opencode.calls.find((call) =>
+        call.path.endsWith("/instructions/entries/masterhand.workspace"),
+      )
+      expect(instruction?.method).toBe("PUT")
+      expect(instruction?.parsedBody?.value).toContain(workspace.path)
+
+      const guard = opencode.calls.find(
+        (call) => call.method === "PATCH" && call.path === `/api/session/${body.session.id}`,
+      )
+      expect(guard?.parsedBody?.permissions).toEqual([
+        { action: "external_directory", resource: "*", effect: "allow" },
+        { action: "edit", resource: "/*", effect: "deny" },
+        { action: "edit", resource: "?:/*", effect: "deny" },
+        { action: "edit", resource: "../*", effect: "deny" },
+      ])
     } finally {
       await app.close()
     }
@@ -135,6 +161,12 @@ describe("POST /api/workspaces/:id/sessions", () => {
       const creation = opencode.calls.find((call) => call.method === "POST" && call.path === "/api/session")
       expect(creation?.parsedBody).toEqual({ location: { directory: isolation.worktreePath } })
       expect(creation?.directory).toBe(isolation.worktreePath)
+
+      // The guard points at the worktree, the actual directory of this session.
+      const instruction = opencode.calls.find((call) =>
+        call.path.endsWith("/instructions/entries/masterhand.workspace"),
+      )
+      expect(instruction?.parsedBody?.value).toContain(isolation.worktreePath)
     } finally {
       await app.close()
     }

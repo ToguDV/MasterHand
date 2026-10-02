@@ -124,17 +124,28 @@ describe("createPullRequest", () => {
 })
 
 describe("createWorktreeManager", () => {
+  it("only treats a directory as its own repo root", () => {
+    const root = createWorktreeManager({ run: vi.fn(() => ok("/repo\n")) })
+    expect(root.isRepoRoot("/repo")).toBe(true)
+
+    const nested = createWorktreeManager({ run: vi.fn(() => ok("/parent\n")) })
+    expect(nested.isRepoRoot("/parent/workspace/app")).toBe(false)
+
+    const none = createWorktreeManager({ run: vi.fn(() => fail()) })
+    expect(none.isRepoRoot("/anything")).toBe(false)
+  })
+
   it("initializes a repo and creates an empty commit when HEAD is missing", () => {
     const calls: string[][] = []
     const run = vi.fn((args: string[]) => {
       calls.push(args)
-      if (args[0] === "rev-parse" && args[1] === "--is-inside-work-tree") return fail()
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return fail()
       if (args[0] === "rev-parse" && args.includes("HEAD")) return fail()
       return ok()
     })
     const manager = createWorktreeManager({ run, userName: "MH", userEmail: "mh@test" })
     manager.ensureRepo("/repo")
-    expect(calls[0]).toEqual(["rev-parse", "--is-inside-work-tree"])
+    expect(calls[0]).toEqual(["rev-parse", "--show-toplevel"])
     expect(calls[1]).toEqual(["init"])
     expect(calls[2]).toEqual(["rev-parse", "--verify", "HEAD"])
     const commit = calls[3] ?? []
@@ -143,16 +154,30 @@ describe("createWorktreeManager", () => {
     expect(commit).toContain("user.name=MH")
   })
 
+  it("initializes a workspace nested inside another repo as its own root", () => {
+    const calls: string[][] = []
+    const run = vi.fn((args: string[]) => {
+      calls.push(args)
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return ok("/parent\n")
+      if (args[0] === "rev-parse" && args.includes("HEAD")) return fail()
+      return ok()
+    })
+    const manager = createWorktreeManager({ run, userName: "MH", userEmail: "mh@test" })
+    manager.ensureRepo("/parent/workspace/app")
+    expect(calls[0]).toEqual(["rev-parse", "--show-toplevel"])
+    expect(calls[1]).toEqual(["init"])
+  })
+
   it("does not initialize or commit an existing repo", () => {
     const calls: string[][] = []
     const run = vi.fn((args: string[]) => {
       calls.push(args)
-      return ok("true")
+      return ok("/repo\n")
     })
     const manager = createWorktreeManager({ run })
     manager.ensureRepo("/repo")
     expect(calls).toEqual([
-      ["rev-parse", "--is-inside-work-tree"],
+      ["rev-parse", "--show-toplevel"],
       ["rev-parse", "--verify", "HEAD"],
     ])
   })
@@ -294,7 +319,7 @@ describe("reconcileWorktrees", () => {
       const orphanPath = join(dir, "root", "app", "orphan")
       const removed: string[] = []
       const manager = {
-        isGitRepo: () => true,
+        isRepoRoot: () => true,
         list: () => [
           { path: join(dir, "app"), head: "a", branch: "main" },
           { path: alivePath, head: "b", branch: "b2" },

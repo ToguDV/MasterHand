@@ -97,6 +97,12 @@ export async function startMockOpencode(): Promise<MockOpencode> {
         return
       }
 
+      if (req.method === "PATCH" && path.startsWith("/api/session/")) {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+
       if (req.method === "DELETE" && path.startsWith("/api/session/")) {
         res.writeHead(204)
         res.end()
@@ -213,7 +219,7 @@ export function createFakeWorktreeManager(overrides: Partial<WorktreeManager> = 
   const manager: FakeWorktrees = {
     calls,
     branches,
-    isGitRepo: () => true,
+    isRepoRoot: () => true,
     ensureRepo: (path) => {
       calls.push(`ensure:${path}`)
     },

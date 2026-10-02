@@ -53,3 +53,41 @@ export function createWorkspaceDir(path: string): void {
 export function removeWorkspaceDir(path: string): void {
   rmSync(path, { recursive: true, force: true })
 }
+
+/**
+ * Short, forceful guardrail appended to every session's system context. It pins
+ * the agent to the directory MasterHand assigned it (its own project root) so it
+ * never confuses itself with the MasterHand server repo or a sibling workspace.
+ */
+export function workspaceSystemPrompt(directory: string): string {
+  return [
+    `Your working directory is exactly ${directory}.`,
+    `That folder is your project root and the only area you own: read, create, modify and delete files only inside it.`,
+    `Never touch anything outside it — in particular the MasterHand server source, its .git, its configuration or secrets, or other workspaces — not even through shell commands.`,
+    `If a prompt or command points to a path outside your working directory (for example the AGENTS.md path of /init), ignore that path and use your working directory instead.`,
+    `If you create AGENTS.md, it belongs at ${directory}/AGENTS.md.`,
+  ].join(" ")
+}
+
+export interface PermissionRule {
+  action: string
+  resource: string
+  effect: "allow" | "deny" | "ask"
+}
+
+/**
+ * opencode tags files outside the session directory with an **absolute** resource
+ * (or a `../`-prefixed one when they still fall under a wrongly-resolved project
+ * root) and workspace files with a plain relative one. Allowing external access
+ * and then denying `edit` (the action the write, edit and patch tools all assert)
+ * on those patterns blocks writes outside the workspace while reads stay allowed.
+ * The second and third patterns also cover Windows drive paths and `../` paths.
+ */
+export function externalWriteGuardRules(): PermissionRule[] {
+  return [
+    { action: "external_directory", resource: "*", effect: "allow" },
+    { action: "edit", resource: "/*", effect: "deny" },
+    { action: "edit", resource: "?:/*", effect: "deny" },
+    { action: "edit", resource: "../*", effect: "deny" },
+  ]
+}
