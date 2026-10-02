@@ -1,3 +1,5 @@
+// Duplicated in `apps/server/src/sse.ts`: the browser clients and the Node BFF
+// build share no module, so both copies must stay in sync.
 export interface SseMessage {
   event?: string
   data: string
@@ -30,12 +32,28 @@ export async function* parseSseStream(stream: ReadableStream<Uint8Array>): Async
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
+  // A chunk can split a CRLF pair (`\r` ends one chunk, `\n` starts the next).
+  // Normalizing per chunk would turn the pair into two line endings (a spurious
+  // blank line), so a trailing CR is held until the next chunk arrives.
+  let pendingCR = false
 
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+      let text = decoder.decode(value, { stream: true })
+      if (pendingCR) {
+        // The held CR was a line ending: drop the LF half when the chunk
+        // completes the pair, otherwise keep the lone CR as a terminator.
+        text = text.startsWith("\n") ? `\n${text.slice(1)}` : `\n${text}`
+        pendingCR = false
+      }
+      text = text.replace(/\r\n/g, "\n")
+      if (text.endsWith("\r")) {
+        pendingCR = true
+        text = text.slice(0, -1)
+      }
+      buffer += text.replace(/\r/g, "\n")
 
       let separator = buffer.indexOf("\n\n")
       while (separator !== -1) {
@@ -46,6 +64,7 @@ export async function* parseSseStream(stream: ReadableStream<Uint8Array>): Async
         separator = buffer.indexOf("\n\n")
       }
     }
+    if (pendingCR) buffer += "\n"
     const rest = parseBlock(buffer)
     if (rest) yield rest
   } finally {
