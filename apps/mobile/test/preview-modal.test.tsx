@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react-native"
-import { ApiError } from "@masterhand/client-core"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native"
+import { ApiError, queryKeys } from "@masterhand/client-core"
 import { PreviewModal } from "../src/components/PreviewModal"
 import { fakeClient, makeQueryClient, QueryWrapper } from "./support/render"
 
@@ -8,7 +8,18 @@ async function setup(client = fakeClient(), onClose = jest.fn()) {
   await render(<PreviewModal client={client} sessionID="s1" onClose={onClose} />, {
     wrapper: ({ children }) => <QueryWrapper client={queryClient}>{children}</QueryWrapper>,
   })
-  return { client, onClose }
+  return { client, onClose, queryClient }
+}
+
+/**
+ * Wait until the initial `preview` fetch has settled. Pressing Start before that
+ * is a race: the in-flight fetch can resolve `stopped` right after the modal
+ * stores the started status, sending it back to the placeholder.
+ */
+async function waitForInitialPreview(queryClient: ReturnType<typeof makeQueryClient>) {
+  await waitFor(() =>
+    expect(queryClient.getQueryState(queryKeys.preview("s1"))?.status).toBe("success"),
+  )
 }
 
 const enabled = { enabled: true, available: true, portRange: { min: 3000, max: 3010 } }
@@ -32,9 +43,10 @@ describe("PreviewModal", () => {
       port: 3000,
       error: null,
     })
-    await setup(client)
+    const { queryClient } = await setup(client)
+    await waitForInitialPreview(queryClient)
 
-    await fireEvent.press(await screen.findByText("Start"))
+    await fireEvent.press(screen.getByText("Start"))
 
     expect(client.api.startPreview).toHaveBeenCalledWith("s1")
     expect(await screen.findByText("WebView: https://abc.trycloudflare.com")).toBeOnTheScreen()
