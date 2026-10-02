@@ -13,7 +13,10 @@ import type {
 import {
   appendDelta,
   directoryName,
+  formatCount,
   formatRelative,
+  formatSpeed,
+  formatTokens,
   isTaskTool,
   makeToolPart,
   mergeLiveMessages,
@@ -24,6 +27,8 @@ import {
   subagentInfo,
   subagentOutput,
   toChatMessage,
+  tokenCounts,
+  tokenSpeed,
   toolTitle,
   updateToolPart,
   upsertToolPart,
@@ -31,8 +36,13 @@ import {
 
 const SESSION = "ses_1"
 
-function tokens(output: number): TokenUsageInfo {
-  return { input: 0, output, reasoning: 0, cache: { read: 0, write: 0 } }
+function tokens(
+  output: number,
+  input = 0,
+  reasoning = 0,
+  cache: { read: number; write: number } = { read: 0, write: 0 },
+): TokenUsageInfo {
+  return { input, output, reasoning, cache }
 }
 
 function userMessage(id: string, text = "hi", created = 1): SessionMessageUser {
@@ -532,18 +542,122 @@ describe("setMessageCost", () => {
 })
 
 describe("sessionUsage", () => {
-  it("totals cost and output tokens across assistant messages only", () => {
+  it("totals cost, every token category and the model time across assistant messages only", () => {
     const list: ChatMessage[] = [
       chatMessage("msg_u", [], "user"),
-      { ...chatMessage("msg_a1"), info: { ...chatMessage("msg_a1").info, cost: 0.5, tokens: tokens(100) } },
-      { ...chatMessage("msg_a2"), info: { ...chatMessage("msg_a2").info, cost: 0.25, tokens: tokens(50) } },
+      {
+        ...chatMessage("msg_a1"),
+        info: {
+          ...chatMessage("msg_a1").info,
+          time: { created: 1, completed: 3001 },
+          cost: 0.5,
+          tokens: tokens(100, 1000, 20, { read: 50, write: 10 }),
+        },
+      },
+      {
+        ...chatMessage("msg_a2"),
+        info: {
+          ...chatMessage("msg_a2").info,
+          time: { created: 10, completed: 1010 },
+          cost: 0.25,
+          tokens: tokens(50, 200, 5, { read: 30, write: 2 }),
+        },
+      },
     ]
-    expect(sessionUsage(list)).toEqual({ cost: 0.75, tokens: 150 })
+    expect(sessionUsage(list)).toEqual({
+      cost: 0.75,
+      durationMs: 4000,
+      input: 1200,
+      output: 150,
+      reasoning: 25,
+      cacheRead: 80,
+      cacheWrite: 12,
+    })
   })
 
   it("tolerates assistant messages without usage", () => {
-    expect(sessionUsage([chatMessage("msg_a")])).toEqual({ cost: 0, tokens: 0 })
-    expect(sessionUsage([])).toEqual({ cost: 0, tokens: 0 })
+    expect(sessionUsage([chatMessage("msg_a")])).toEqual({
+      cost: 0,
+      durationMs: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    })
+    expect(sessionUsage([])).toEqual({
+      cost: 0,
+      durationMs: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    })
+  })
+})
+
+describe("tokenCounts and formatTokens", () => {
+  it("normalizes a full TokenUsageInfo", () => {
+    expect(tokenCounts(tokens(100, 1000, 20, { read: 50, write: 10 }))).toEqual({
+      input: 1000,
+      output: 100,
+      reasoning: 20,
+      cacheRead: 50,
+      cacheWrite: 10,
+    })
+  })
+
+  it("normalizes missing tokens to zeros", () => {
+    expect(tokenCounts(undefined)).toEqual({ input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 })
+  })
+
+  it("formats every non-zero category with abbreviated counts, skipping the rest", () => {
+    expect(formatTokens(tokenCounts(tokens(100, 1000, 20, { read: 50, write: 10 })))).toBe(
+      "1k input · 100 output · 20 reasoning · 50 cache read · 10 cache write",
+    )
+    expect(formatTokens(tokenCounts(tokens(100, 1500)))).toBe("1.5k input · 100 output")
+    expect(formatTokens(tokenCounts(undefined))).toBe("")
+  })
+})
+
+describe("formatCount", () => {
+  it("abbreviates thousands, millions and billions", () => {
+    expect(formatCount(999)).toBe("999")
+    expect(formatCount(1000)).toBe("1k")
+    expect(formatCount(1200)).toBe("1.2k")
+    expect(formatCount(12345)).toBe("12.3k")
+    expect(formatCount(1_000_000)).toBe("1m")
+    expect(formatCount(1_500_000)).toBe("1.5m")
+    expect(formatCount(1_250_000_000)).toBe("1.3b")
+  })
+
+  it("promotes a value that would round up to the next unit", () => {
+    expect(formatCount(999_999)).toBe("1m")
+    expect(formatCount(999_999_999)).toBe("1b")
+  })
+
+  it("passes through non-finite values", () => {
+    expect(formatCount(Number.POSITIVE_INFINITY)).toBe("0")
+    expect(formatCount(Number.NaN)).toBe("0")
+  })
+})
+
+describe("tokenSpeed and formatSpeed", () => {
+  it("measures generated tokens (output + reasoning) per second", () => {
+    expect(tokenSpeed(tokenCounts(tokens(100, 1000, 100)), 4000)).toBe(50)
+    expect(tokenSpeed(tokenCounts(tokens(100, 1000)), 2000)).toBe(50)
+  })
+
+  it("returns null when there is nothing to measure", () => {
+    expect(tokenSpeed(tokenCounts(undefined), 1000)).toBeNull()
+    expect(tokenSpeed(tokenCounts(tokens(100)), 0)).toBeNull()
+  })
+
+  it("formats a speed with one decimal, dropping a trailing zero", () => {
+    expect(formatSpeed(42.348)).toBe("42.3 tok/s")
+    expect(formatSpeed(42)).toBe("42 tok/s")
+    expect(formatSpeed(null)).toBe("")
   })
 })
 

@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   conversationErrorMessage,
+  formatSpeed,
+  formatTokens,
   sessionUsage,
+  tokenSpeed,
   useMessages,
   type FinishSessionResult,
   type SessionIsolation,
@@ -42,6 +45,8 @@ export function ChatView({
 
   const messages = messagesQuery.data ?? []
   const usage = sessionUsage(messages)
+  const tokenBreakdown = formatTokens(usage)
+  const speed = formatSpeed(tokenSpeed(usage, usage.durationMs))
   const [visibleCount, setVisibleCount] = useState(MESSAGE_PAGE_SIZE)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
@@ -111,11 +116,12 @@ export function ChatView({
           )}
         </div>
       </div>
-      {usage.cost > 0 && (
+      {(usage.cost > 0 || tokenBreakdown) && (
         <div className="px-3 pt-2 md:px-6">
           <p className="mx-auto w-full max-w-3xl text-right text-xs text-zinc-600">
             Session · ${usage.cost.toFixed(4)}
-            {usage.tokens > 0 ? ` · ${usage.tokens} tok` : ""}
+            {tokenBreakdown ? ` · ${tokenBreakdown}` : ""}
+            {speed ? ` · ${speed}` : ""}
           </p>
         </div>
       )}

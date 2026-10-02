@@ -89,10 +89,10 @@ describe("MessageBubble", () => {
     await render(
       bubble(
         {
-          time: { created: 1, completed: 2 },
+          time: { created: 1000, completed: 3000 },
           modelID: "test-model",
           cost: 0.0021,
-          tokens: { output: 42 } as ChatMessageInfo["tokens"],
+          tokens: { input: 1000, output: 42 } as ChatMessageInfo["tokens"],
           error: { name: "x", message: "boom" } as unknown as ChatMessageInfo["error"],
         },
         [textPart("done")],
@@ -100,7 +100,7 @@ describe("MessageBubble", () => {
     )
 
     expect(screen.getByText("boom")).toBeOnTheScreen()
-    expect(screen.getByText("test-model · $0.0021 · 42 tok")).toBeOnTheScreen()
+    expect(screen.getByText("test-model · $0.0021 · 1k input · 42 output · 21 tok/s")).toBeOnTheScreen()
   })
 
   it("reveals reasoning text on demand", async () => {

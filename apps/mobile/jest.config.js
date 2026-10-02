@@ -5,6 +5,9 @@ module.exports = {
   preset: "jest-expo",
   testMatch: ["<rootDir>/test/**/*.test.{ts,tsx}"],
   setupFilesAfterEnv: ["<rootDir>/test/setup.ts"],
+  // React Native render tests are slow under coverage on CI runners; the 5s
+  // default made unrelated suites (Composer, ChatScreen) flake with timeouts.
+  testTimeout: 30000,
   // Keep the preset's react-native mappings and add the ESM-only SDK stub.
   moduleNameMapper: {
     ...moduleNameMapper,
