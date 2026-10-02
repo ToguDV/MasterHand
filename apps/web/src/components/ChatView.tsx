@@ -12,6 +12,9 @@ import { AssistantBlock, UserBubble } from "./MessageContent"
 import { Composer } from "./Composer"
 import { PreviewPanel } from "./PreviewPanel"
 
+/** Messages rendered at once; older ones load on demand (no virtualization). */
+const MESSAGE_PAGE_SIZE = 200
+
 export function ChatView({
   sessionID,
   busy,
@@ -39,8 +42,14 @@ export function ChatView({
 
   const messages = messagesQuery.data ?? []
   const usage = sessionUsage(messages)
+  const [visibleCount, setVisibleCount] = useState(MESSAGE_PAGE_SIZE)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+
+  // A very long session (the client loads up to 10 000 messages) would mount a
+  // bubble per message; render the newest page and let the user expand it.
+  const hiddenCount = Math.max(0, messages.length - visibleCount)
+  const visibleMessages = hiddenCount > 0 ? messages.slice(hiddenCount) : messages
 
   async function finish() {
     setFinishing(true)
@@ -84,7 +93,16 @@ export function ChatView({
               Write a message to start working with the agent.
             </p>
           )}
-          {messages.map((entry) =>
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((count) => count + MESSAGE_PAGE_SIZE)}
+              className="mx-auto rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            >
+              Show {Math.min(MESSAGE_PAGE_SIZE, hiddenCount)} earlier messages
+            </button>
+          )}
+          {visibleMessages.map((entry) =>
             entry.info.role === "user" ? (
               <UserBubble key={entry.info.id} entry={entry} />
             ) : (

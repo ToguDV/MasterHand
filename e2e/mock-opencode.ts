@@ -75,6 +75,8 @@ interface PendingPermission {
 const sseClients = new Set<ServerResponse>()
 const sessions = new Map<string, SessionRecord>()
 const conversations = new Map<string, SessionMessage[]>()
+/** Order of the first message page per session (cursor pages inherit it). */
+const messageOrders = new Map<string, string>()
 const pendingPermissions = new Map<string, PendingPermission>()
 const activeRuns = new Set<string>()
 
@@ -529,9 +531,13 @@ const server = createServer((req, res) => {
       const session = sessions.get(sessionID)
 
       if (req.method === "GET" && segments[3] === "message") {
+        // opencode keeps the first page's `order` across cursor pages (verified
+        // against 2.0.21); remember it per session instead of defaulting to asc.
+        const requestedOrder = url.searchParams.get("order")
+        if (requestedOrder) messageOrders.set(sessionID, requestedOrder)
+        const order = requestedOrder ?? messageOrders.get(sessionID) ?? "asc"
         const all = [...(conversations.get(sessionID) ?? [])].sort((a, b) => a.time.created - b.time.created)
-        // v2: `order` only goes on the first page; cursor pages keep it implicit.
-        const ordered = url.searchParams.get("order") === "desc" ? [...all].reverse() : all
+        const ordered = order === "desc" ? [...all].reverse() : all
         const limit = Number(url.searchParams.get("limit") ?? "200")
         const offset = Number(url.searchParams.get("cursor") ?? "0")
         const page = ordered.slice(offset, offset + limit)
@@ -543,6 +549,18 @@ const server = createServer((req, res) => {
         const body = await readBody(req)
         const text = typeof body.text === "string" ? body.text : ""
         const message = appendUserMessage(sessionID, text)
+        // E2E helper: `/seed N` fills the conversation with N more messages and
+        // reports the session idle, so clients refetch the whole history.
+        const seed = /^\/seed (\d+)$/.exec(text.trim())
+        if (seed) {
+          const count = Math.max(0, Math.min(Number(seed[1]), 1000))
+          for (let index = 1; index <= count; index += 1) {
+            appendUserMessage(sessionID, `Seed message ${index}`)
+          }
+          broadcast("session.idle", { sessionID }, session.location.directory)
+        } else {
+          void runPrompt(sessionID, text)
+        }
         json(res, 200, {
           data: {
             id: message.id,
@@ -553,7 +571,6 @@ const server = createServer((req, res) => {
             delivery: "steer",
           },
         })
-        void runPrompt(sessionID, text)
         return
       }
       if (req.method === "POST" && segments[3] === "agent") {
@@ -594,6 +611,7 @@ const server = createServer((req, res) => {
       if (req.method === "DELETE" && segments.length === 3) {
         sessions.delete(sessionID)
         conversations.delete(sessionID)
+        messageOrders.delete(sessionID)
         activeRuns.delete(sessionID)
         for (const [id, pending] of pendingPermissions) {
           if (pending.sessionID === sessionID) pendingPermissions.delete(id)
