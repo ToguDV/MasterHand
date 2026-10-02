@@ -31,7 +31,10 @@ describe("PreviewModal", () => {
     await setup(client)
 
     expect(await screen.findByText("Start")).toBeOnTheScreen()
-    expect(screen.getByText(/port 3000/)).toBeOnTheScreen()
+    // The placeholder port comes from the status query; wait for it instead of
+    // racing the async resolution (Start renders as soon as `unavailable` is
+    // false, which is also true before the status arrives).
+    expect(await screen.findByText(/port 3000/)).toBeOnTheScreen()
   })
 
   it("starts the tunnel and renders the WebView", async () => {
@@ -109,5 +112,31 @@ describe("PreviewModal", () => {
     await fireEvent.press(await screen.findByText("Close"))
 
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("reports a failed stop", async () => {
+    const client = fakeClient()
+    client.auth.status.mockResolvedValue({ ok: true, preview: enabled })
+    client.api.preview.mockResolvedValue({
+      status: "running",
+      url: "https://abc.trycloudflare.com",
+      port: 3000,
+      error: null,
+    })
+    client.api.stopPreview.mockRejectedValue(new Error("nope"))
+    await setup(client)
+
+    await fireEvent.press(await screen.findByText("Stop"))
+
+    expect(await screen.findByText("Could not stop the preview")).toBeOnTheScreen()
+  })
+
+  it("shows the starting placeholder while the tunnel boots", async () => {
+    const client = fakeClient()
+    client.auth.status.mockResolvedValue({ ok: true, preview: enabled })
+    client.api.preview.mockResolvedValue({ status: "starting", url: null, port: 3000, error: null })
+    await setup(client)
+
+    expect(await screen.findByText("Starting the tunnel…")).toBeOnTheScreen()
   })
 })

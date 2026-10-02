@@ -150,4 +150,48 @@ describe("MessageBubble", () => {
     await fireEvent.press(screen.getByText("Open session →"))
     expect(onOpenSession).toHaveBeenCalledWith("child-1")
   })
+
+  it("ignores parts it cannot render", async () => {
+    await render(
+      bubble({ time: { created: 1, completed: 2 } }, [
+        { id: "p-step", sessionID: "s1", messageID: "m1", type: "step-start" } as unknown as ChatPart,
+        textPart("visible text"),
+      ]),
+    )
+
+    expect(screen.getByText(/visible text/)).toBeOnTheScreen()
+  })
+
+  it("shows a tool error when the tool failed", async () => {
+    await render(
+      bubble({ time: { created: 1, completed: 2 } }, [
+        toolPart({ status: "error", title: "failing tool", input: {}, error: "command failed" }),
+      ]),
+    )
+
+    await fireEvent.press(screen.getByText("Error"))
+    expect(screen.getByText("command failed")).toBeOnTheScreen()
+  })
+
+  it("falls back to a generic message for an empty agent error", async () => {
+    await render(
+      bubble(
+        { time: { created: 1, completed: 2 }, error: { name: "x", message: "" } as unknown as ChatMessageInfo["error"] },
+        [textPart("done")],
+      ),
+    )
+
+    expect(screen.getByText("Agent error")).toBeOnTheScreen()
+  })
+
+  it("omits zero cost and tokens from the usage line", async () => {
+    await render(
+      bubble(
+        { time: { created: 1, completed: 2 }, modelID: "test-model", cost: 0, tokens: { output: 0 } as ChatMessageInfo["tokens"] },
+        [textPart("done")],
+      ),
+    )
+
+    expect(screen.getByText("test-model")).toBeOnTheScreen()
+  })
 })

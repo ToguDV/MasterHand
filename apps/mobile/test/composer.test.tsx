@@ -1,7 +1,20 @@
 import { fireEvent, render, screen } from "@testing-library/react-native"
-import type { AgentInfo, ModelInfo, ProviderInfo } from "@masterhand/client-core"
+import { ApiError, type AgentInfo, type ModelInfo, type ProviderInfo } from "@masterhand/client-core"
 import { Composer } from "../src/components/Composer"
+import { loadSessionPreferences } from "../src/storage"
 import { fakeClient, makeQueryClient, QueryWrapper } from "./support/render"
+
+jest.mock("../src/storage", () => ({
+  loadSessionPreferences: jest.fn(async () => ({})),
+  saveSessionPreferences: jest.fn(async () => {}),
+}))
+
+const loadPreferences = loadSessionPreferences as unknown as jest.Mock
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  loadPreferences.mockResolvedValue({})
+})
 
 const agents: AgentInfo[] = [
   { id: "build", name: "Build", mode: "primary" },
@@ -109,5 +122,48 @@ describe("Composer", () => {
       { text: "go", agent: "build", model: { providerID: "test", id: "test-model", variant: "high" } },
       { agent: undefined, model: undefined },
     )
+  })
+
+  it("reports a failed send with the HTTP status", async () => {
+    const { client } = await setup()
+    client.api.prompt.mockRejectedValue(new ApiError(500, "x"))
+
+    await fireEvent.changeText(await screen.findByPlaceholderText("Write a message…"), "hi")
+    await fireEvent.press(screen.getByText("Send"))
+
+    expect(await screen.findByText("Could not send (HTTP 500)")).toBeOnTheScreen()
+  })
+
+  it("reports a network failure to send", async () => {
+    const { client } = await setup()
+    client.api.prompt.mockRejectedValue(new Error("offline"))
+
+    await fireEvent.changeText(await screen.findByPlaceholderText("Write a message…"), "hi")
+    await fireEvent.press(screen.getByText("Send"))
+
+    expect(await screen.findByText("Could not send")).toBeOnTheScreen()
+  })
+
+  it("switches the agent through the picker", async () => {
+    const { client } = await setup()
+
+    await fireEvent.press(await screen.findByText("Build"))
+    await fireEvent.press(await screen.findByText("Explore"))
+    await fireEvent.changeText(screen.getByPlaceholderText("Write a message…"), "go")
+    await fireEvent.press(screen.getByText("Send"))
+
+    expect(client.api.prompt).toHaveBeenCalledWith(
+      "s1",
+      { text: "go", agent: "explore", model: { providerID: "test", id: "test-model" } },
+      { agent: undefined, model: undefined },
+    )
+  })
+
+  it("restores the saved per-session selection", async () => {
+    loadPreferences.mockResolvedValue({ agent: "explore", model: "test/alpha" })
+    await setup()
+
+    expect(await screen.findByText("Explore")).toBeOnTheScreen()
+    expect(screen.getByText("Test · Alpha")).toBeOnTheScreen()
   })
 })

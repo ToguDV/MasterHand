@@ -71,4 +71,59 @@ describe("WorkspaceModal", () => {
     await fireEvent.press(screen.getByText("Remove workspace"))
     expect(handlers.onRemove).toHaveBeenLastCalledWith("ws1", { deleteFiles: true })
   })
+
+  it("explains an invalid folder name", async () => {
+    const onAdd = jest.fn(async () => {
+      throw new ApiError(400, "bad name")
+    })
+    await setup({ onAdd })
+
+    await fireEvent.press(screen.getByText("Add workspace"))
+    await fireEvent.changeText(screen.getByPlaceholderText("my-project"), "a/b")
+    await fireEvent.press(screen.getByText("Add"))
+
+    expect(await screen.findByText("Enter a valid folder name (no slashes or leading dots)")).toBeOnTheScreen()
+  })
+
+  it("falls back to a generic error", async () => {
+    const onAdd = jest.fn(async () => {
+      throw new Error("boom")
+    })
+    await setup({ onAdd })
+
+    await fireEvent.press(screen.getByText("Add workspace"))
+    await fireEvent.changeText(screen.getByPlaceholderText("my-project"), "fresh")
+    await fireEvent.press(screen.getByText("Add"))
+
+    expect(await screen.findByText("Could not add the workspace")).toBeOnTheScreen()
+  })
+
+  it("cancels the add form", async () => {
+    await setup()
+
+    await fireEvent.press(screen.getByText("Add workspace"))
+    expect(screen.getByPlaceholderText("my-project")).toBeOnTheScreen()
+
+    await fireEvent.press(screen.getByText("Cancel"))
+    expect(screen.queryByPlaceholderText("my-project")).toBeNull()
+  })
+
+  it("resets the form when the sheet is hidden", async () => {
+    const props = {
+      workspaces,
+      selectedID: null,
+      onSelect: jest.fn(),
+      onAdd: jest.fn(async () => {}),
+      onRemove: jest.fn(),
+      onClose: jest.fn(),
+    }
+    const { rerender } = await render(<WorkspaceModal visible {...props} />)
+
+    await fireEvent.press(screen.getByText("Add workspace"))
+    await fireEvent.changeText(screen.getByPlaceholderText("my-project"), "typed")
+    await rerender(<WorkspaceModal visible={false} {...props} />)
+    await rerender(<WorkspaceModal visible {...props} />)
+
+    expect(screen.queryByPlaceholderText("my-project")).toBeNull()
+  })
 })

@@ -59,4 +59,23 @@ describe("Screen", () => {
 
     spy.mockRestore()
   })
+
+  it("listens to Android keyboard events", async () => {
+    const platform = jest.replaceProperty(Platform, "OS", "android")
+    const listener = jest.spyOn(Keyboard, "addListener").mockImplementation(
+      () => ({ remove: jest.fn() }) as never,
+    )
+
+    await render(
+      <Screen>
+        <Text>content</Text>
+      </Screen>,
+    )
+
+    expect(listener).toHaveBeenCalledWith("keyboardDidShow", expect.any(Function))
+    expect(listener).toHaveBeenCalledWith("keyboardDidHide", expect.any(Function))
+
+    listener.mockRestore()
+    platform.restore()
+  })
 })
