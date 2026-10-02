@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { Pressable, StyleSheet, Text, View } from "react-native"
+import Markdown, { darkStyles, type MarkdownStyleMap } from "@ronradtke/react-native-markdown-display"
 import {
   isTaskTool,
-  splitFences,
   subagentInfo,
   subagentOutput,
   toolTitle,
@@ -14,22 +14,63 @@ import {
 } from "@masterhand/client-core"
 import { colors } from "../theme"
 
-function SegmentText({ text }: { text: string }) {
-  const segments = splitFences(text)
+// Assistant output is markdown: render it as such. The library ships a complete
+// dark preset; only the palette is overridden to match the app theme.
+const markdownStyles: MarkdownStyleMap = {
+  ...darkStyles,
+  body: { color: colors.text, fontSize: 15, lineHeight: 22 },
+  paragraph: { ...darkStyles.paragraph, marginTop: 4, marginBottom: 4 },
+  heading1: { ...darkStyles.heading1, color: colors.text, fontWeight: "700", marginTop: 8, marginBottom: 4 },
+  heading2: { ...darkStyles.heading2, color: colors.text, fontWeight: "700", marginTop: 8, marginBottom: 4 },
+  heading3: { ...darkStyles.heading3, color: colors.text, fontWeight: "700", marginTop: 6, marginBottom: 2 },
+  heading4: { ...darkStyles.heading4, color: colors.text, fontWeight: "700", marginTop: 6, marginBottom: 2 },
+  heading5: { ...darkStyles.heading5, color: colors.muted, fontWeight: "700", marginTop: 6, marginBottom: 2 },
+  heading6: { ...darkStyles.heading6, color: colors.muted, fontWeight: "700", marginTop: 6, marginBottom: 2 },
+  hr: { backgroundColor: colors.border, height: StyleSheet.hairlineWidth },
+  blockquote: {
+    ...darkStyles.blockquote,
+    backgroundColor: "transparent",
+    borderColor: colors.border,
+    borderLeftWidth: 2,
+    marginLeft: 0,
+    paddingHorizontal: 8,
+  },
+  link: { ...darkStyles.link, color: "#818cf8" },
+  blocklink: { ...darkStyles.blocklink, borderColor: colors.border },
+  code_inline: {
+    ...darkStyles.code_inline,
+    borderWidth: 0,
+    backgroundColor: colors.surfaceMuted,
+    color: "#e4e4e7",
+    padding: 0,
+    paddingHorizontal: 4,
+    borderRadius: 4,
+  },
+  code_block: {
+    ...darkStyles.code_block,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: "#000000",
+    color: "#d4d4d8",
+    padding: 10,
+    borderRadius: 8,
+  },
+  fence: { ...darkStyles.fence, borderColor: colors.border, borderRadius: 8 },
+  fence_header: { ...darkStyles.fence_header, backgroundColor: colors.surface, borderBottomColor: colors.border },
+  fence_language_label: { ...darkStyles.fence_language_label, color: colors.muted },
+  fence_code: { ...darkStyles.fence_code, backgroundColor: "#000000" },
+  table: { ...darkStyles.table, borderColor: colors.border, borderRadius: 6 },
+  tr: { ...darkStyles.tr, borderColor: colors.border },
+  th: { ...darkStyles.th, color: colors.text, fontWeight: "700", backgroundColor: colors.surface },
+  td: { ...darkStyles.td, color: colors.text },
+}
+
+function MarkdownText({ text }: { text: string }) {
+  if (!text.trim()) return null
   return (
-    <View style={styles.segments}>
-      {segments.map((segment, index) =>
-        segment.type === "code" ? (
-          <View key={index} style={styles.codeBlock}>
-            <Text style={styles.codeText}>{segment.content}</Text>
-          </View>
-        ) : (
-          <Text key={index} style={styles.bodyText}>
-            {segment.content.trimEnd()}
-          </Text>
-        ),
-      )}
-    </View>
+    <Markdown colorScheme="dark" style={markdownStyles}>
+      {text}
+    </Markdown>
   )
 }
 
@@ -132,7 +173,7 @@ function PartView({
 }) {
   switch (part.type) {
     case "text":
-      return <SegmentText text={part.text} />
+      return <MarkdownText text={part.text} />
     case "reasoning":
       return <Reasoning text={part.text} />
     case "tool":
@@ -193,9 +234,6 @@ export function MessageBubble({
 }
 
 const styles = StyleSheet.create({
-  segments: {
-    gap: 8,
-  },
   bodyText: {
     color: colors.text,
     fontSize: 15,
@@ -224,13 +262,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginTop: 4,
-  },
-  codeBlock: {
-    backgroundColor: "#000000",
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: 10,
   },
   codeText: {
     color: "#d4d4d8",

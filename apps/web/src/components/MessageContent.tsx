@@ -1,7 +1,9 @@
-import { useState } from "react"
+import { memo, useState } from "react"
+import ReactMarkdown, { type Components } from "react-markdown"
+import remarkBreaks from "remark-breaks"
+import remarkGfm from "remark-gfm"
 import {
   isTaskTool,
-  splitFences,
   subagentInfo,
   subagentOutput,
   toolTitle,
@@ -12,27 +14,68 @@ import {
   type ChatToolPart,
 } from "@masterhand/client-core"
 
-function MarkdownText({ text }: { text: string }) {
-  const segments = splitFences(text)
+// Assistant output is markdown; render it as such (GFM + single newlines as
+// breaks, matching what the model expects to see). Tailwind has no typography
+// plugin installed, so every element is styled explicitly for the dark theme.
+const markdownComponents: Components = {
+  p: ({ node, ...props }) => <p className="my-2 break-words first:mt-0 last:mb-0" {...props} />,
+  h1: ({ node, ...props }) => <h1 className="mt-4 mb-2 text-xl font-semibold first:mt-0" {...props} />,
+  h2: ({ node, ...props }) => <h2 className="mt-4 mb-2 text-lg font-semibold first:mt-0" {...props} />,
+  h3: ({ node, ...props }) => <h3 className="mt-3 mb-1.5 text-base font-semibold first:mt-0" {...props} />,
+  h4: ({ node, ...props }) => <h4 className="mt-3 mb-1.5 text-[15px] font-semibold first:mt-0" {...props} />,
+  h5: ({ node, ...props }) => <h5 className="mt-3 mb-1.5 text-[15px] font-semibold first:mt-0" {...props} />,
+  h6: ({ node, ...props }) => <h6 className="mt-3 mb-1.5 text-[15px] font-semibold text-zinc-400 first:mt-0" {...props} />,
+  ul: ({ node, ...props }) => (
+    <ul className="my-2 list-disc space-y-1 pl-5 first:mt-0 last:mb-0 [&>li:has(>input)]:list-none" {...props} />
+  ),
+  ol: ({ node, ...props }) => <ol className="my-2 list-decimal space-y-1 pl-5 first:mt-0 last:mb-0" {...props} />,
+  li: ({ node, ...props }) => <li className="break-words [&>p]:my-0 [&>ol]:my-1 [&>ul]:my-1" {...props} />,
+  blockquote: ({ node, ...props }) => (
+    <blockquote className="my-2 border-l-2 border-zinc-700 pl-3 text-zinc-400 first:mt-0 last:mb-0" {...props} />
+  ),
+  a: ({ node, ...props }) => (
+    <a
+      className="text-indigo-400 underline decoration-indigo-400/40 underline-offset-2 hover:text-indigo-300"
+      target="_blank"
+      rel="noreferrer"
+      {...props}
+    />
+  ),
+  code: ({ node, ...props }) => (
+    <code className="rounded bg-zinc-800/80 px-1 py-0.5 font-mono text-[13px] text-zinc-100" {...props} />
+  ),
+  pre: ({ node, ...props }) => (
+    <pre
+      className="scroll-thin my-2 overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs leading-relaxed text-zinc-200 first:mt-0 last:mb-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit"
+      {...props}
+    />
+  ),
+  table: ({ node, ...props }) => (
+    <div className="scroll-thin my-3 overflow-x-auto first:mt-0 last:mb-0">
+      <table className="w-full border-collapse text-sm" {...props} />
+    </div>
+  ),
+  th: ({ node, ...props }) => (
+    <th className="border border-zinc-800 bg-zinc-900/60 px-2 py-1 text-left font-semibold" {...props} />
+  ),
+  td: ({ node, ...props }) => <td className="border border-zinc-800 px-2 py-1 align-top" {...props} />,
+  hr: ({ node, ...props }) => <hr className="my-4 border-zinc-800" {...props} />,
+  img: ({ node, ...props }) => <img className="my-2 max-w-full rounded-lg" {...props} />,
+  input: ({ node, ...props }) => <input className="mr-1.5 accent-indigo-500" {...props} />,
+}
+
+// Memoized: streaming updates rebuild the message list on every delta, but the
+// text of every other part keeps the same string value, so parsing is skipped.
+const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
+  if (!text.trim()) return null
   return (
-    <div className="space-y-2 text-[15px] leading-relaxed">
-      {segments.map((segment, index) =>
-        segment.type === "code" ? (
-          <pre
-            key={index}
-            className="scroll-thin overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs leading-relaxed"
-          >
-            <code>{segment.content}</code>
-          </pre>
-        ) : (
-          <p key={index} className="break-words whitespace-pre-wrap">
-            {segment.content.trimEnd()}
-          </p>
-        ),
-      )}
+    <div data-testid="markdown" className="text-[15px] leading-relaxed">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
     </div>
   )
-}
+})
 
 function ReasoningBlock({ part }: { part: ChatReasoningPart }) {
   return (

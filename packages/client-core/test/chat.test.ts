@@ -21,7 +21,6 @@ import {
   sessionUsage,
   setMessageCost,
   setStreamText,
-  splitFences,
   subagentInfo,
   subagentOutput,
   toChatMessage,
@@ -676,23 +675,4 @@ describe("formatting utilities", () => {
     expect(formatRelative(now - 40 * 86_400_000, now)).toBe(new Date(now - 40 * 86_400_000).toLocaleDateString())
   })
 
-  it("splits fenced code blocks", () => {
-    const segments = splitFences("before\n```ts\nconst a = 1\n```\nafter")
-    expect(segments).toEqual([
-      { type: "text", content: "before\n" },
-      { type: "code", language: "ts", content: "const a = 1\n" },
-      { type: "text", content: "\nafter" },
-    ])
-  })
-
-  it("handles fences without a language and drops blank segments", () => {
-    const segments = splitFences("```\ncode\n```")
-    expect(segments).toEqual([{ type: "code", language: undefined, content: "code\n" }])
-
-    expect(splitFences("   ")).toEqual([])
-  })
-
-  it("returns a single text segment without fences", () => {
-    expect(splitFences("plain text")).toEqual([{ type: "text", content: "plain text" }])
-  })
 })

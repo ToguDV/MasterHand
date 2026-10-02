@@ -340,12 +340,51 @@ async function runSubagentPrompt(sessionID: string, text: string): Promise<void>
   activeRuns.delete(sessionID)
 }
 
+/** Streams a markdown-rich reply (exercised by `markdown.spec.ts`). */
+async function runMarkdownPrompt(sessionID: string): Promise<void> {
+  const session = sessions.get(sessionID)
+  if (!session) return
+
+  activeRuns.add(sessionID)
+  broadcast("session.execution.started", { sessionID }, session.location.directory)
+  await delay(30)
+
+  const assistant = appendAssistantMessage(sessionID)
+  const markdown = [
+    "# Report",
+    "",
+    "Plain first line",
+    "second line with **bold**, *italic*, ~~struck~~ and `inline code`.",
+    "",
+    "- first item",
+    "- second item",
+    "",
+    "| Name | Value |",
+    "| ---- | ----- |",
+    "| alpha | 1 |",
+    "",
+    "```ts",
+    "const a = 1",
+    "```",
+    "",
+    "See the [docs](https://example.com/docs).",
+  ].join("\n")
+  assistant.content = [{ type: "text", text: markdown }]
+  streamText(sessionID, assistant.id, 0, markdown)
+  completeAssistant(session, assistant, {
+    cost: 0.002,
+    tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+  activeRuns.delete(sessionID)
+}
+
 async function runPrompt(sessionID: string, text: string): Promise<void> {
   const session = sessions.get(sessionID)
   const conversation = conversations.get(sessionID)
   if (!session || !conversation) return
 
   if (text.toLowerCase().includes("subagent")) return runSubagentPrompt(sessionID, text)
+  if (text.toLowerCase().includes("markdown")) return runMarkdownPrompt(sessionID)
 
   activeRuns.add(sessionID)
   broadcast("session.execution.started", { sessionID }, session.location.directory)
