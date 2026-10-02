@@ -1,6 +1,6 @@
 # MasterHand BFF API
 
-Verified on **2026-10-01** against the implementation (`apps/server/src/app.ts`).
+Verified on **2026-10-02** against the implementation (`apps/server/src/app.ts`).
 
 Base URL: the deployer's origin (in development, `http://127.0.0.1:8787`).
 
@@ -41,11 +41,11 @@ Other rules:
 | `DELETE` | `/api/devices/:id` | `{ ok: true }` | Revokes a device token |
 | `GET` | `/api/commands` | `{ commands: SlashCommand[] }` | Slash commands for a location (`?directory=/abs`), with deterministic argument hints. Composes opencode's `/api/command` catalog with the `template` only `/api/config` exposes (`$ARGUMENTS`, `$1..$N`, `[a\|b\|c]`), so raw config never reaches the clients. `502` when opencode is unreachable; a broken config degrades to commands without hints |
 | `GET` | `/api/workspaces` | `{ workspaces: WorkspaceRecord[] }` | Workspaces, oldest first |
-| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "name": "my-project" }`. The BFF creates `<WORKSPACES_ROOT>/<name>` (mkdir -p) and returns it. `name` becomes both the folder and the display name. `400` invalid name (separators, traversal, leading dot, >64 chars), `409` already registered |
+| `POST` | `/api/workspaces` | `201 { workspace }` | Body: `{ "name": "my-project" }`. The BFF creates `<WORKSPACES_ROOT>/<name>` (mkdir -p), makes it its **own git root** (`git init` + empty first commit) and returns it. `name` becomes both the folder and the display name. `400` invalid name (separators, traversal, leading dot, >64 chars), `409` already registered |
 | `DELETE` | `/api/workspaces/:id` | `{ ok: true }` | Removes the workspace from MasterHand's list and cleans up its isolated worktrees and records. With `?deleteFiles=1` it also deletes the folder and its files from disk (only when the path is inside `WORKSPACES_ROOT`, otherwise `403`); without it, files and opencode sessions are untouched. `404` unknown workspace |
 | `GET` | `/api/workspaces/:id/directories` | `{ directories: string[] }` | Workspace folder plus every isolated worktree of the workspace (used to reconcile pending permissions per directory) |
 | `GET` | `/api/workspaces/:id/sessions` | `{ sessions: Session[] }` | Aggregates opencode sessions from the workspace folder and every worktree. Isolated sessions (and subagent children) carry `isolation: { isolated: true, worktreePath, branch, baseRef, pushed, prUrl }`. `502` when opencode is unreachable |
-| `POST` | `/api/workspaces/:id/sessions` | `201 { session, isolation }` | Body: `{ "isolated": true }` optional. Standard sessions are created in the workspace folder (`isolation: null`). Isolated sessions `git init` the workspace when needed, create a worktree under `WORKTREES_ROOT`, create the opencode session there and return the `isolation` metadata. On failure the worktree is rolled back (`500 isolation_failed`) |
+| `POST` | `/api/workspaces/:id/sessions` | `201 { session, isolation }` | Body: `{ "isolated": true }` optional. Standard sessions are created in the workspace folder (`isolation: null`); legacy workspaces are made their own git root first. Isolated sessions `git init` the workspace when needed, create a worktree under `WORKTREES_ROOT`, create the opencode session there and return the `isolation` metadata. In both cases the BFF then writes the `masterhand.workspace` instruction and sets the external-write guard (see below). On failure the worktree is rolled back (`500 isolation_failed`) |
 | `DELETE` | `/api/workspaces/:id/sessions/:sessionID` | `{ ok: true }` | Deletes the opencode session (the session id resolves its location; no `directory` needed). For isolated sessions it also removes the worktree and the branch. `404` unknown workspace |
 | `POST` | `/api/isolated-sessions/:sessionID/finish` | `{ committed, pushed, prUrl, branch, path, error }` | Commits everything in the worktree. With a remote it pushes the branch and tries `gh`/`glab` for the PR, falling back to a provider compare URL; `error` reports a failed push. `404` for unknown/non-isolated sessions |
 | `GET` | `/api/sessions/:sessionID/preview` | `{ preview: PreviewStatus }` | Current preview state for the session. `404 preview_disabled` when `PREVIEW_ENABLED=false` |
@@ -63,6 +63,17 @@ Each session gets a **fixed port** from `PREVIEW_PORT_RANGE` on session creation
 `PreviewStatus` shape: `{ status: "stopped" | "starting" | "running" | "error", url, port, error }`. The tunnel process lives in the BFF container; `PREVIEW_ORIGIN` is the host where the dev server listens as seen from there (`opencode` in Compose, `127.0.0.1` in native dev). Tunnels stop on `DELETE`, on session deletion and on BFF shutdown.
 
 > Quick tunnels are **public and ephemeral**: anyone with the random URL can reach the preview, and the URL changes on every start. Use them for testing only.
+
+## Workspace isolation & guardrails
+
+opencode resolves project-scoped features (`/init`, `/review`, `AGENTS.md` discovery, the reported "workspace root") from its **`project.directory`**, computed by walking up to the nearest `.git`/`.hg` — it does not use the session's `location.directory` for them. A workspace nested inside the MasterHand repo would therefore make opencode target the **server** repo. MasterHand prevents that on two layers:
+
+1. **Every workspace is its own git root.** The BFF runs `git init` (+ empty first commit) on workspace creation and, for legacy folders, before the first session. opencode then stops at the workspace when resolving its project root.
+2. **Per-session guardrails**, written best-effort on session creation (a failure never blocks the session):
+   - An instruction entry `PUT /api/experimental/session/:id/instructions/entries/masterhand.workspace` (key `masterhand.workspace`, independent from `masterhand.preview`) pinning the agent to its exact directory: that folder is its project root and `AGENTS.md` belongs at `<dir>/AGENTS.md`; it must not touch anything outside it, and must ignore out-of-workspace paths a prompt may mention (e.g. the `AGENTS.md` path of `/init`).
+   - `PATCH /api/session/:id` with `permissions`: `external_directory` is allowed and `edit` (the action the write, edit and patch tools assert) is denied on absolute (`/*`, `?:/*`) and `../*` resources. opencode tags files outside the session directory with an absolute or `../`-prefixed resource and workspace files with a plain relative one, so **writes outside the workspace are blocked while reads stay allowed**.
+
+This is defense in depth; it does **not** sandbox shell access (`bash` is a separate permission), which remains a documented limitation (see `ARCHITECTURE.md` §5).
 
 ## Proxy to opencode
 

@@ -703,6 +703,11 @@ const server = createServer((req, res) => {
         }
         return empty(res, 204)
       }
+      if (req.method === "PATCH") {
+        // MasterHand sets the session's external-write guard right after creation.
+        await readBody(req)
+        return empty(res, 204)
+      }
       if (req.method === "DELETE" && segments.length === 3) {
         sessions.delete(sessionID)
         conversations.delete(sessionID)

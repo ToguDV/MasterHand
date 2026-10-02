@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createFakeTunnel, login, startMockOpencode, startTestApp, type MockOpencode, type TestApp } from "./helpers.js"
+import {
+  createFakeTunnel,
+  createFakeWorktreeManager,
+  login,
+  startMockOpencode,
+  startTestApp,
+  type MockOpencode,
+  type TestApp,
+} from "./helpers.js"
 
 let app: TestApp | null = null
 let upstream: MockOpencode | null = null
@@ -182,7 +190,9 @@ describe("preview routes", () => {
     const { session } = (await created.json()) as { session: { id: string } }
 
     // The v2 instructions entry carries the reserved port to the agent.
-    const instruction = upstream.requests.find((request) => request.path.includes("/instructions/entries/"))
+    const instruction = upstream.requests.find((request) =>
+      request.path.endsWith("/instructions/entries/masterhand.preview"),
+    )
     expect(instruction?.method).toBe("PUT")
     expect(instruction?.path).toBe(
       `/api/experimental/session/${session.id}/instructions/entries/masterhand.preview`,
@@ -263,6 +273,22 @@ describe("/api/workspaces", () => {
     expect(removed.status).toBe(200)
     const empty = await fetch(`${app.url}/api/workspaces`, { headers: { cookie } })
     expect((await empty.json()) as { workspaces: unknown[] }).toMatchObject({ workspaces: [] })
+  })
+
+  it("initializes the workspace as its own git root", async () => {
+    const worktrees = createFakeWorktreeManager()
+    app = await startTestApp({ worktrees })
+    const cookie = await login(app.url)
+
+    const created = await fetch(`${app.url}/api/workspaces`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "app" }),
+    })
+    expect(created.status).toBe(201)
+    const { workspace } = (await created.json()) as { workspace: { path: string } }
+    // A nested workspace must not resolve opencode's project root to MasterHand.
+    expect(worktrees.calls).toEqual([`ensure:${workspace.path}`])
   })
 
   it("trims the given name", async () => {
