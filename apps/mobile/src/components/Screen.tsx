@@ -1,11 +1,11 @@
 import type { PropsWithChildren } from "react"
-import { Platform, SafeAreaView, StatusBar, StyleSheet, View } from "react-native"
+import { StyleSheet, View } from "react-native"
+import { SafeAreaView } from "react-native-safe-area-context"
 import { colors } from "../theme"
 
 export function Screen({ children, style }: PropsWithChildren<{ style?: object }>) {
-  const topInset = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0
   return (
-    <SafeAreaView style={[styles.safe, { paddingTop: topInset }]}>
+    <SafeAreaView style={styles.safe}>
       <View style={[styles.content, style]}>{children}</View>
     </SafeAreaView>
   )

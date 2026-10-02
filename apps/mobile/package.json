@@ -7,6 +7,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "test": "vitest run",
+    "test:coverage": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,10 +19,13 @@
     "expo-secure-store": "~57.0.4",
     "react": "19.3.0",
     "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/react": "~19.3.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.2"
   }
 }

@@ -56,7 +56,7 @@ Technical design. For scope and requirements see `SPEC.md`; for status see `PROG
 | Web UI | React 19 + Vite + TS | Ecosystem, fast iteration |
 | Mobile UI | React Native + Expo | One language across platforms, native distribution |
 | Desktop | Electron loading the deployed web app | Reuses the whole web UI with minimal extra code; keeps cookies same-origin |
-| Shared logic | `packages/client-core` | One API/query/SSE layer reused by all clients; platform UI stays free |
+| Shared logic | `packages/client-core` | One API/query/SSE layer reused by all clients; platform UI stays free. It must run without DOM globals: React Native has no `document` and its global `window` has no DOM listener API, so anything web-specific is feature-detected |
 | UI styling | Tailwind v4 (web) / RN primitives (mobile) | Mobile-first, no lock-in |
 | Message rendering | `react-markdown` + `remark-gfm`/`remark-breaks` (web/desktop) · `@ronradtke/react-native-markdown-display` (mobile) | Assistant replies are markdown (tables, lists, code, links); both render React elements with no raw-HTML path |
 | API client | `@opencode/client` (v2, Promise) pointed at the BFF proxy | Generated client and types from opencode's v2 contract; the BFF injects auth |

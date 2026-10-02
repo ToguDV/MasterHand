@@ -17,6 +17,7 @@ import {
   type CreateWorkspaceInput,
   type Permission,
 } from "@masterhand/client-core"
+import { SafeAreaProvider } from "react-native-safe-area-context"
 import { LoginScreen } from "./src/screens/LoginScreen"
 import { SessionsScreen } from "./src/screens/SessionsScreen"
 import { ChatScreen } from "./src/screens/ChatScreen"
@@ -52,9 +53,11 @@ const fetchImpl = expoFetch as unknown as typeof fetch
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <Root />
-    </QueryClientProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <Root />
+      </QueryClientProvider>
+    </SafeAreaProvider>
   )
 }
 
