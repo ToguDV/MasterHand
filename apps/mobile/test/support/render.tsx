@@ -26,6 +26,8 @@ export interface FakeClient {
     messages: jest.Mock
     prompt: jest.Mock
     runCommand: jest.Mock
+    forkSession: jest.Mock
+    removeSession: jest.Mock
     abortSession: jest.Mock
     preview: jest.Mock
     startPreview: jest.Mock
@@ -45,6 +47,8 @@ export function fakeClient(): FakeClient & Client {
       messages: jest.fn(async () => []),
       prompt: jest.fn(async () => {}),
       runCommand: jest.fn(async () => {}),
+      forkSession: jest.fn(async () => ({ id: "fork_1" })),
+      removeSession: jest.fn(async () => {}),
       abortSession: jest.fn(async () => {}),
       preview: jest.fn(async () => STOPPED_PREVIEW),
       startPreview: jest.fn(async () => STOPPED_PREVIEW),

@@ -58,6 +58,7 @@ export {
   type UseEventStreamOptions,
 } from "./hooks"
 export {
+  appCommands,
   argumentSuggestions,
   buildComposerPopover,
   collectAgentMentions,
@@ -66,6 +67,7 @@ export {
   filterAgentMentions,
   filterCommands,
   mentionableAgents,
+  mergeCommands,
   splitCommand,
   type ComposerPopover,
   type ComposerPopoverItem,

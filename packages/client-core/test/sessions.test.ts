@@ -32,4 +32,13 @@ describe("rootSessions", () => {
     const child = { id: "ses_child", parentID: "ses_parent" } as Session
     expect(rootSessions([parent, child]).map((item) => item.id)).toEqual(["ses_parent"])
   })
+
+  it("hides temporary /btw forks from the list", () => {
+    const parent = session("ses_parent")
+    const fork = {
+      id: "ses_fork",
+      fork: { sessionID: "ses_parent", boundary: { type: "through" as const, messageID: "msg_1" } },
+    } as Session
+    expect(rootSessions([parent, fork]).map((item) => item.id)).toEqual(["ses_parent"])
+  })
 })

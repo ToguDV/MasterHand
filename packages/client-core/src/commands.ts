@@ -94,6 +94,24 @@ export function mentionableAgents(agents: AgentInfo[]): AgentInfo[] {
   return agents.filter((agent) => agent.hidden !== true && (agent.mode === "subagent" || agent.mode === "all"))
 }
 
+/**
+ * Commands MasterHand implements itself (not opencode server commands), merged
+ * into the `/` popover. A server command with the same name never shadows them.
+ */
+export const appCommands: SlashCommand[] = [
+  {
+    name: "btw",
+    description: "Ask a side question (temporary session, does not affect this chat)",
+    arguments: [{ position: 0, freeForm: true, suggestions: [] }],
+  },
+]
+
+/** App commands first, then the server catalog without name collisions. */
+export function mergeCommands(commands: SlashCommand[]): SlashCommand[] {
+  const reserved = new Set(appCommands.map((command) => command.name))
+  return [...appCommands, ...commands.filter((command) => !reserved.has(command.name))]
+}
+
 /** Mentionable agents matching `query` by id or display name. */
 export function filterAgentMentions(agents: AgentInfo[], query: string): AgentInfo[] {
   const term = query.trim().toLowerCase()
