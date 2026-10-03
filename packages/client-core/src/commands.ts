@@ -183,17 +183,35 @@ export function buildComposerPopover(
 
   const command = commands.find((item) => item.name === trigger.command)
   if (!command || command.arguments.length === 0) return null
-  const items = argumentSuggestions(command, trigger.query).map((value) => ({
-    id: `argument:${value}`,
-    label: value,
-    replacement: `${value} `,
-  }))
-  const known = argumentSuggestions(command, "").length > 0
+
+  const term = trigger.query.trim()
+  // Suggestions are only ever content matches. An empty or non-matching token
+  // must not resurface the full list: that is what made a picked value keep
+  // suggesting itself (and every sibling) infinitely.
+  if (term) {
+    const matches = argumentSuggestions(command, term)
+    if (matches.length === 0) return null
+    return {
+      title: `/${command.name}`,
+      hint: commandArgumentHint(command),
+      items: matches.map((value) => ({
+        id: `argument:${value}`,
+        label: value,
+        replacement: `${value} `,
+      })),
+      emptyLabel: "No matches",
+    }
+  }
+
+  // Empty token: hint commands that expect arguments but declare no candidate
+  // values (free-form or positional placeholders). Commands with a fixed value
+  // list stay hidden until the user types, so the list always matches content.
+  if (argumentSuggestions(command, "").length > 0) return null
   return {
     title: `/${command.name}`,
     hint: commandArgumentHint(command),
-    items,
-    emptyLabel: known ? "No matches" : "Type the arguments…",
+    items: [],
+    emptyLabel: "Type the arguments…",
   }
 }
 

@@ -419,6 +419,8 @@ export function Composer({
                   void send()
                 }
               }}
+              onFocus={() => setDismissed(false)}
+              onBlur={() => setDismissed(true)}
               onClick={(event) => {
                 setDismissed(false)
                 moveCaret(event.currentTarget.selectionStart ?? 0)

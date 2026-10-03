@@ -99,6 +99,7 @@ describe("command argument hints", () => {
   it("filters suggestions by the partial argument", () => {
     expect(argumentSuggestions(commands[0]!, "")).toEqual(["commit", "branch", "pr"])
     expect(argumentSuggestions(commands[0]!, "b")).toEqual(["branch"])
+    expect(argumentSuggestions(commands[0]!, "c")).toEqual(["commit"])
   })
 
   it("describes free-form and positional arguments", () => {
@@ -153,6 +154,15 @@ describe("buildComposerPopover", () => {
     expect(buildComposerPopover({ kind: "command", query: "zzz", start: 0, end: 4 }, commands, [])).toBeNull()
     expect(buildComposerPopover({ kind: "arguments", command: "init", query: "", start: 6, end: 6 }, commands, [])).toBeNull()
     expect(buildComposerPopover({ kind: "arguments", command: "missing", query: "", start: 0, end: 0 }, commands, [])).toBeNull()
+  })
+
+  it("only shows argument values that match the typed content", () => {
+    // An empty or non-matching token never falls back to the full list.
+    expect(buildComposerPopover({ kind: "arguments", command: "review", query: "", start: 8, end: 8 }, commands, [])).toBeNull()
+    expect(buildComposerPopover({ kind: "arguments", command: "review", query: "zzz", start: 8, end: 11 }, commands, [])).toBeNull()
+
+    const matches = buildComposerPopover({ kind: "arguments", command: "review", query: "c", start: 8, end: 9 }, commands, [])
+    expect(matches?.items.map((item) => item.label)).toEqual(["commit"])
   })
 
   it("builds the argument popover with suggestions and an empty hint", () => {

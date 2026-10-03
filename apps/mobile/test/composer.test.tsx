@@ -182,13 +182,17 @@ describe("Composer", () => {
       },
     ]
     const { client } = await setup({}, { commands })
+    const input = await screen.findByPlaceholderText("Write a message…")
 
-    await fireEvent.changeText(await screen.findByPlaceholderText("Write a message…"), "/rev")
+    await fireEvent.changeText(input, "/rev")
     await fireEvent.press(await screen.findByText("/review"))
 
-    // Argument suggestions come from the command's own description.
+    // Argument suggestions only surface values that match the typed content.
+    await fireEvent.changeText(input, "/review c")
     await fireEvent.press(await screen.findByText("commit"))
-    expect(screen.getByPlaceholderText("Write a message…").props.value).toBe("/review commit ")
+    expect(input.props.value).toBe("/review commit ")
+    // Picking a value closes the list instead of re-suggesting it forever.
+    expect(screen.queryByText("branch")).toBeNull()
 
     await fireEvent.press(screen.getByText("Send"))
 
@@ -198,6 +202,45 @@ describe("Composer", () => {
       { agent: undefined, model: undefined },
     )
     expect(client.api.prompt).not.toHaveBeenCalled()
+  })
+
+  it("hides argument suggestions that do not match the typed content", async () => {
+    const commands: SlashCommand[] = [
+      {
+        name: "review",
+        description: "review changes [commit|branch|pr]",
+        arguments: [{ position: 1, freeForm: false, suggestions: ["commit", "branch", "pr"] }],
+      },
+    ]
+    await setup({}, { commands })
+    const input = await screen.findByPlaceholderText("Write a message…")
+
+    await fireEvent.changeText(input, "/rev")
+    await fireEvent.press(await screen.findByText("/review"))
+    await fireEvent.changeText(input, "/review zzz")
+
+    expect(screen.queryByText("commit")).toBeNull()
+  })
+
+  it("dismisses suggestions on blur and restores them on focus", async () => {
+    const commands: SlashCommand[] = [
+      {
+        name: "review",
+        description: "review changes [commit|branch|pr]",
+        arguments: [{ position: 1, freeForm: false, suggestions: ["commit", "branch", "pr"] }],
+      },
+    ]
+    await setup({}, { commands })
+    const input = await screen.findByPlaceholderText("Write a message…")
+
+    await fireEvent.changeText(input, "/rev")
+    expect(await screen.findByText("/review")).toBeOnTheScreen()
+
+    await fireEvent(input, "blur")
+    expect(screen.queryByText("/review")).toBeNull()
+
+    await fireEvent(input, "focus")
+    expect(await screen.findByText("/review")).toBeOnTheScreen()
   })
 
   it("opens the subagent list on @ and attaches the mention", async () => {

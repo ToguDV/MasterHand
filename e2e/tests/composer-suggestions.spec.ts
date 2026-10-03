@@ -36,20 +36,55 @@ test("opens the subagent list on @ and inserts the mention", async ({ page }) =>
   await expect(composer).toHaveValue("@general ")
 })
 
-test("suggests and inserts an argument from the command description", async ({ page }) => {
+test("suggests and inserts an argument that matches the typed content", async ({ page }) => {
   await login(page)
   await addWorkspace(page)
   await page.getByRole("button", { name: "+ New" }).click()
 
   const composer = page.getByPlaceholder("Write a message…")
-  await composer.fill("/review ")
-  await expect(page.getByRole("option", { name: "commit" })).toBeVisible()
+  await composer.fill("/review c")
+  const list = page.locator("#composer-suggestions")
+  await expect(list.getByRole("option", { name: "commit" })).toBeVisible()
+  // Only the values that match the typed content are offered.
+  await expect(list.getByRole("option", { name: "branch" })).toHaveCount(0)
 
-  await page.getByRole("option", { name: "commit" }).click()
+  await list.getByRole("option", { name: "commit" }).click()
   await expect(composer).toHaveValue("/review commit ")
+  // Picking a value closes the list instead of re-suggesting itself forever.
+  await expect(list).toHaveCount(0)
 
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page.getByText("Review the changes: commit")).toBeVisible()
+})
+
+test("hides argument suggestions that do not match the typed content", async ({ page }) => {
+  await login(page)
+  await addWorkspace(page)
+  await page.getByRole("button", { name: "+ New" }).click()
+
+  const composer = page.getByPlaceholder("Write a message…")
+  await composer.fill("/review zzz")
+
+  await expect(page.locator("#composer-suggestions")).toHaveCount(0)
+})
+
+test("closes the suggestions when the composer loses focus and reopens them on focus", async ({ page }) => {
+  await login(page)
+  await addWorkspace(page)
+  await page.getByRole("button", { name: "+ New" }).click()
+
+  const composer = page.getByPlaceholder("Write a message…")
+  await composer.fill("/rev")
+  const command = page.getByRole("option", { name: "/review" })
+  await expect(command).toBeVisible()
+
+  // Clicking outside the composer (blur) dismisses the popover…
+  await composer.blur()
+  await expect(command).toBeHidden()
+
+  // …and returning to it brings the content-matched suggestion back.
+  await composer.click()
+  await expect(command).toBeVisible()
 })
 
 test("/btw answers a side question in a temporary session", async ({ page }) => {
