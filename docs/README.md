@@ -12,7 +12,7 @@ Index of specific documentation (APIs, runbooks, decisions). High-level document
 
 | Document | Content | Status |
 |---|---|---|
-| [`opencode/events.md`](opencode/events.md) | opencode SSE event types (verified) and which ones MasterHand consumes | ✅ 2026-09-27 |
+| [`opencode/events.md`](opencode/events.md) | opencode SSE event types (verified) and which ones MasterHand consumes | ✅ 2026-10-03 |
 | [`opencode/http-api.md`](opencode/http-api.md) | opencode HTTP endpoints relevant to MasterHand | ✅ 2026-09-27 |
 | [`bff/api.md`](bff/api.md) | MasterHand BFF API (auth, proxy, SSE relay) | ✅ 2026-09-27 |
 | [`runbooks/deployment.md`](runbooks/deployment.md) | Deployment with Docker Compose and TLS options for the deployer | ✅ 2026-09-27 |

@@ -457,6 +457,62 @@ describe("opencode session operations", () => {
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ decision: "reject" })
   })
 
+  it("lists the forms of a session and the pending forms of a location", async () => {
+    const form = { id: "frm_1", sessionID: "ses_1", title: "Questions", fields: [{ key: "a", type: "string" }] }
+    const { calls, fetchImpl } = recordingFetch(
+      () => jsonResponse({ data: [form] }),
+      () => jsonResponse({ location: { directory: "/workspace/app" }, data: [form] }),
+    )
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.forms("ses_1")).toEqual([form])
+    expect(await client.api.pendingForms("/workspace/app")).toEqual([form])
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://mh.example/api/oc/api/session/ses_1/form",
+      "https://mh.example/api/oc/api/form?location%5Bdirectory%5D=%2Fworkspace%2Fapp",
+    ])
+  })
+
+  it("lists pending forms without a location", async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ location: {}, data: [] }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.pendingForms()).toEqual([])
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/api/form")
+  })
+
+  it("gets a form with its state", async () => {
+    const detail = {
+      id: "frm_1",
+      sessionID: "ses_1",
+      title: "Questions",
+      fields: [{ key: "a", type: "string" }],
+      state: { status: "pending" },
+    }
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse({ data: detail }))
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    expect(await client.api.form("ses_1", "frm_1")).toEqual(detail)
+    expect(calls[0]?.url).toBe("https://mh.example/api/oc/api/session/ses_1/form/frm_1")
+  })
+
+  it("replies to and cancels a form", async () => {
+    const { calls, fetchImpl } = recordingFetch(
+      () => new Response(null, { status: 204 }),
+      () => new Response(null, { status: 204 }),
+    )
+    const client = createClient({ baseUrl: "https://mh.example", fetchImpl })
+
+    await client.api.respondForm("ses_1", "frm/1", { a: "x" })
+    await client.api.cancelForm("ses_1", "frm/1")
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://mh.example/api/oc/api/session/ses_1/form/frm%2F1/reply",
+      "https://mh.example/api/oc/api/session/ses_1/form/frm%2F1",
+    ])
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ answer: { a: "x" } })
+    expect(calls[1]?.init?.method).toBe("DELETE")
+  })
+
   it("unwraps the agent catalog", async () => {
     const { fetchImpl } = recordingFetch(() => jsonResponse({ data: [{ id: "build", name: "build" }] }))
     const client = createClient({ baseUrl: "https://mh.example", fetchImpl })

@@ -255,11 +255,31 @@ describe("createEventHandler", () => {
     expect(onPermissionReplied).toHaveBeenCalledWith("per_1")
   })
 
+  it("dispatches form callbacks", () => {
+    const { qc } = makeQueryClient()
+    const onForm = vi.fn()
+    const onFormSettled = vi.fn()
+    const handler = createEventHandler(qc, { onForm, onFormSettled })
+
+    const form = { id: "frm_1", sessionID: SESSION, title: "Questions", fields: [{ key: "a", type: "string" }] }
+    emit(handler, "form.created", { form })
+    expect(onForm).toHaveBeenCalledWith(form)
+
+    emit(handler, "form.replied", { id: "frm_1", sessionID: SESSION, answer: { a: "x" } })
+    expect(onFormSettled).toHaveBeenCalledWith("frm_1")
+
+    emit(handler, "form.cancelled", { id: "frm_2", sessionID: SESSION })
+    expect(onFormSettled).toHaveBeenCalledWith("frm_2")
+  })
+
   it("works without callbacks", () => {
     const { qc } = makeQueryClient()
     const handler = createEventHandler(qc)
     expect(() => emit(handler, "permission.asked", {})).not.toThrow()
     expect(() => emit(handler, "permission.replied", {})).not.toThrow()
+    expect(() => emit(handler, "form.created", {})).not.toThrow()
+    expect(() => emit(handler, "form.replied", {})).not.toThrow()
+    expect(() => emit(handler, "form.cancelled", {})).not.toThrow()
   })
 
   it("appends streamed text deltas only when the session is cached", () => {
@@ -478,6 +498,7 @@ describe("createEventHandler", () => {
       status: "running",
       input: { command: "ls" },
     })
+    expect((cachedParts(qc)[0] as ChatToolPart).state.timing?.ran).toBeTypeOf("number")
 
     emit(handler, "session.tool.called", {
       sessionID: SESSION,
@@ -513,12 +534,15 @@ describe("createEventHandler", () => {
       metadata: { title: "Done" },
       executed: true,
     })
-    expect((cachedParts(qc)[0] as ChatToolPart).state).toEqual({
+    const completed = (cachedParts(qc)[0] as ChatToolPart).state
+    expect(completed).toMatchObject({
       status: "completed",
       input: { command: "pwd" },
       output: "done",
       metadata: { title: "Done" },
     })
+    expect(completed.timing?.created).toBeTypeOf("number")
+    expect(completed.timing?.completed).toBeTypeOf("number")
 
     emit(handler, "session.tool.failed", {
       sessionID: SESSION,
@@ -529,7 +553,7 @@ describe("createEventHandler", () => {
       metadata: { title: "Failed" },
       executed: true,
     })
-    expect((cachedParts(qc)[0] as ChatToolPart).state).toEqual({
+    expect((cachedParts(qc)[0] as ChatToolPart).state).toMatchObject({
       status: "error",
       input: { command: "pwd" },
       error: "kaboom",
@@ -573,7 +597,7 @@ describe("createEventHandler", () => {
       executed: true,
     })
     const failed = cachedParts(qc).find((part) => part.type === "tool" && part.callID === "call_failed") as ChatToolPart
-    expect(failed.state).toEqual({
+    expect(failed.state).toMatchObject({
       status: "error",
       input: {},
       error: "nope",

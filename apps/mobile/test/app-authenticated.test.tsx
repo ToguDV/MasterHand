@@ -13,10 +13,13 @@ import {
   ApiError,
   createClient,
   useEventStream,
+  useMessages,
   useSessionDirectories,
   useSessions,
   useSessionStatuses,
   useWorkspaces,
+  type ChatMessage,
+  type FormInfo,
   type Permission,
   type Session,
   type WorkspaceRecord,
@@ -67,6 +70,7 @@ const workspacesMock = useWorkspaces as unknown as jest.Mock
 const sessionsMock = useSessions as unknown as jest.Mock
 const directoriesMock = useSessionDirectories as unknown as jest.Mock
 const statusesMock = useSessionStatuses as unknown as jest.Mock
+const messagesMock = useMessages as unknown as jest.Mock
 
 interface MockedStorage {
   loadServerUrl: jest.Mock
@@ -106,6 +110,33 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 
 const permission: Permission = { id: "perm_1", sessionID: "ses_1", action: "bash", resources: ["ls"] }
 
+const questionForm: FormInfo = {
+  id: "frm_1",
+  sessionID: "ses_1",
+  title: "Questions",
+  metadata: { kind: "question", tool: { messageID: "msg_1", id: "call_q" } } as FormInfo["metadata"],
+  fields: [
+    { key: "q0", type: "string", title: "Color", options: [{ label: "Red", value: "Red" }] },
+  ] as FormInfo["fields"],
+}
+
+function questionMessage(): ChatMessage {
+  return {
+    info: { id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1, completed: 2 } },
+    parts: [
+      {
+        id: "call_q",
+        sessionID: "ses_1",
+        messageID: "msg_1",
+        type: "tool",
+        tool: "question",
+        callID: "call_q",
+        state: { status: "running", input: {} },
+      },
+    ],
+  }
+}
+
 function makeClient() {
   return {
     auth: {
@@ -124,6 +155,11 @@ function makeClient() {
       abortSession: jest.fn(async () => {}),
       permissions: jest.fn(async (): Promise<Permission[]> => []),
       respondPermission: jest.fn(async () => {}),
+      pendingForms: jest.fn(async () => []),
+      forms: jest.fn(async () => []),
+      form: jest.fn(async () => ({})),
+      respondForm: jest.fn(async () => {}),
+      cancelForm: jest.fn(async () => {}),
       sessions: {
         create: jest.fn(async () => makeSession({ id: "ses_new", title: "New" })),
         remove: jest.fn(async () => {}),
@@ -172,6 +208,7 @@ beforeEach(() => {
   sessionsMock.mockReturnValue({ data: [], isLoading: false })
   directoriesMock.mockReturnValue({ data: [], isLoading: false })
   statusesMock.mockReturnValue({ data: {} })
+  messagesMock.mockReturnValue({ data: [], isLoading: false })
   eventStreamMock.mockImplementation(() => jest.fn())
   client = makeClient()
   createClientMock.mockReturnValue(client)
@@ -192,6 +229,7 @@ async function renderAuthenticated(options: {
   directories?: string[]
   autoAccept?: string[]
   workspaceID?: string | null
+  messages?: ChatMessage[]
 } = {}) {
   storage.loadToken.mockResolvedValue("stored-token")
   storage.loadServerUrl.mockResolvedValue("https://host")
@@ -202,6 +240,7 @@ async function renderAuthenticated(options: {
   workspacesMock.mockReturnValue({ data: options.workspaces ?? [workspace], isLoading: false })
   sessionsMock.mockReturnValue({ data: options.sessions ?? [], isLoading: false })
   directoriesMock.mockReturnValue({ data: options.directories ?? [], isLoading: false })
+  messagesMock.mockReturnValue({ data: options.messages ?? [], isLoading: false })
 
   await render(<App />)
   await screen.findByText("Sessions")
@@ -484,6 +523,78 @@ describe("App — permissions and events", () => {
     })
 
     expect(await screen.findByText("Could not answer the permission request")).toBeOnTheScreen()
+  })
+
+  it("shows an inline question from the stream and answers it", async () => {
+    await renderAuthenticated({ sessions: [makeSession()], messages: [questionMessage()] })
+    await fireEvent.press(screen.getByText("My session"))
+
+    await act(async () => {
+      streamOptions().onEvent({ type: "form.created", data: { form: questionForm } })
+    })
+
+    expect(await screen.findByTestId("question-card")).toBeOnTheScreen()
+    await fireEvent.press(screen.getByText("Red"))
+    await fireEvent.press(screen.getByText("Answer"))
+
+    await waitFor(() => expect(client.api.respondForm).toHaveBeenCalledWith("ses_1", "frm_1", { q0: "Red" }))
+    expect(await screen.findByTestId("question-answered")).toBeOnTheScreen()
+  })
+
+  it("dismisses a question and prunes it when answered elsewhere", async () => {
+    await renderAuthenticated({ sessions: [makeSession()], messages: [questionMessage()] })
+    await fireEvent.press(screen.getByText("My session"))
+
+    await act(async () => {
+      streamOptions().onEvent({ type: "form.created", data: { form: questionForm } })
+    })
+    expect(await screen.findByTestId("question-card")).toBeOnTheScreen()
+
+    await fireEvent.press(screen.getByText("Dismiss"))
+    await waitFor(() => expect(client.api.cancelForm).toHaveBeenCalledWith("ses_1", "frm_1"))
+    await waitFor(() => expect(screen.queryByTestId("question-card")).toBeNull())
+
+    await act(async () => {
+      streamOptions().onEvent({ type: "form.created", data: { form: questionForm } })
+    })
+    expect(await screen.findByTestId("question-card")).toBeOnTheScreen()
+    await act(async () => {
+      streamOptions().onEvent({ type: "form.replied", data: { id: "frm_1" } })
+    })
+    await waitFor(() => expect(screen.queryByTestId("question-card")).toBeNull())
+  })
+
+  it("banners a failed question answer", async () => {
+    client = makeClient()
+    client.api.respondForm.mockRejectedValue(new Error("nope"))
+    createClientMock.mockReturnValue(client)
+    await renderAuthenticated({ sessions: [makeSession()], messages: [questionMessage()] })
+    await fireEvent.press(screen.getByText("My session"))
+
+    await act(async () => {
+      streamOptions().onEvent({ type: "form.created", data: { form: questionForm } })
+    })
+    await fireEvent.press(await screen.findByText("Red"))
+    await fireEvent.press(screen.getByText("Answer"))
+
+    expect(await screen.findByText(/Could not answer the question/)).toBeOnTheScreen()
+  })
+
+  it("surfaces a question raised in another session", async () => {
+    const other = makeSession({ id: "ses_2", title: "Other session" })
+    await renderAuthenticated({ sessions: [makeSession(), other], messages: [questionMessage()] })
+    await fireEvent.press(screen.getByText("My session"))
+
+    await act(async () => {
+      streamOptions().onEvent({
+        type: "form.created",
+        data: { form: { ...questionForm, sessionID: "ses_2" } },
+      })
+    })
+
+    const jump = await screen.findByText(/waiting for your answer/)
+    await fireEvent.press(jump)
+    expect(await screen.findByText("Other session")).toBeOnTheScreen()
   })
 })
 

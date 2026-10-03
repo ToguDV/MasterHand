@@ -111,18 +111,20 @@ describe("MessageBubble", () => {
     expect(screen.getByText("because reasons")).toBeOnTheScreen()
   })
 
-  it("expands a tool card to show its input and output", async () => {
+  it("expands a tool card to show its command and output", async () => {
     await render(
       bubble({ time: { created: 1, completed: 2 } }, [
         toolPart({ status: "completed", title: "list files", input: { cmd: "ls" }, output: "file.txt" }),
       ]),
     )
 
-    expect(screen.getByText("bash")).toBeOnTheScreen()
-    expect(screen.getByText("list files")).toBeOnTheScreen()
-    await fireEvent.press(screen.getByText("list files"))
-    expect(screen.getByText(/"cmd": "ls"/)).toBeOnTheScreen()
+    expect(screen.getByText("ls")).toBeOnTheScreen()
+    expect(screen.getByText(/list files/)).toBeOnTheScreen()
+    await fireEvent.press(screen.getByText("ls"))
+    expect(screen.getAllByText("ls").length).toBeGreaterThan(0)
     expect(screen.getByText("file.txt")).toBeOnTheScreen()
+    // No raw JSON dump anywhere in the card.
+    expect(screen.queryByText(/"cmd": "ls"/)).toBeNull()
   })
 
   it("renders a subagent card and opens the child session", async () => {
@@ -169,7 +171,7 @@ describe("MessageBubble", () => {
       ]),
     )
 
-    await fireEvent.press(screen.getByText("Error"))
+    await fireEvent.press(screen.getByText("failing tool"))
     expect(screen.getByText("command failed")).toBeOnTheScreen()
   })
 

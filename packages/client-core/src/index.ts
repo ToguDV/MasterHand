@@ -75,3 +75,40 @@ export {
 } from "./commands"
 export { filterSessions, rootSessions, type SessionFilter } from "./sessions"
 export { reconcilePermissions } from "./permissions"
+export {
+  countDiffLines,
+  describeTool,
+  diffLines,
+  firstLine,
+  formatDuration,
+  isQuestionTool,
+  lineCountLabel,
+  looksLikeDiff,
+  looksLineNumbered,
+  parsePatch,
+  pathParts,
+  stripAnsi,
+  truncateLines,
+  type DiffLine,
+  type KeyValueEntry,
+  type QuestionItem,
+  type QuestionOption,
+  type TodoItem,
+  type ToolAccent,
+  type ToolIcon,
+  type ToolKind,
+  type ToolSummary,
+  type TruncatedText,
+} from "./tools"
+export {
+  defaultAnswer,
+  describeFormAnswer,
+  fieldLabel,
+  formIsQuestion,
+  formToolCallID,
+  formatAnswerValue,
+  isFieldVisible,
+  reconcileForms,
+  toFormAnswer,
+  validateForm,
+} from "./forms"

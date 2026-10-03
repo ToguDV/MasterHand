@@ -12,6 +12,13 @@ import type {
 
 export type {
   AgentInfo,
+  FormAnswer,
+  FormDetail,
+  FormField,
+  FormInfo,
+  FormOption,
+  FormState,
+  FormValue,
   ModelInfo,
   ModelRef,
   ModelVariant,
@@ -205,6 +212,13 @@ export interface ChatMessageInfo {
 
 export type ChatToolStatus = "pending" | "running" | "completed" | "error"
 
+/** Wall-clock marks opencode tracks for a tool call (all in epoch ms). */
+export interface ChatToolTiming {
+  created?: number
+  ran?: number
+  completed?: number
+}
+
 export interface ChatToolState {
   status: ChatToolStatus
   title?: string
@@ -214,6 +228,8 @@ export interface ChatToolState {
   metadata?: Record<string, unknown>
   /** Raw (partial) JSON while the tool input is still streaming. */
   raw?: string
+  /** Timing marks (history projection, plus live marks from tool events). */
+  timing?: ChatToolTiming
 }
 
 export type ChatTextPart = {

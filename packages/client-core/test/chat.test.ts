@@ -179,6 +179,7 @@ describe("toChatMessage", () => {
       input: { file: "a.ts" },
       metadata: { title: "Reading" },
       title: "Reading",
+      timing: { created: 1, ran: undefined, completed: undefined },
     })
 
     const completed = toChatMessage(
@@ -204,6 +205,7 @@ describe("toChatMessage", () => {
       output: "out\n[x.ts] file://x",
       metadata: { title: "Done" },
       title: "Done",
+      timing: { created: 1, ran: undefined, completed: undefined },
     })
 
     const failed = toChatMessage(
@@ -226,6 +228,7 @@ describe("toChatMessage", () => {
       output: "details",
       error: "kaboom",
       metadata: undefined,
+      timing: { created: 1, ran: undefined, completed: undefined },
     })
   })
 

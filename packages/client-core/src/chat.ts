@@ -32,6 +32,11 @@ function toolOutput(content: unknown): string | undefined {
 
 function toolState(part: SessionMessageAssistantTool): ChatToolState {
   const state = part.state
+  const timing = {
+    created: part.time.created,
+    ran: part.time.ran,
+    completed: part.time.completed,
+  }
   if (state.status === "streaming") {
     return { status: "pending", input: {}, raw: state.input }
   }
@@ -41,6 +46,7 @@ function toolState(part: SessionMessageAssistantTool): ChatToolState {
       input: state.input as Record<string, unknown>,
       metadata: state.metadata as Record<string, unknown>,
       title: readString(state.metadata, "title") ?? undefined,
+      timing,
     }
   }
   if (state.status === "completed") {
@@ -50,6 +56,7 @@ function toolState(part: SessionMessageAssistantTool): ChatToolState {
       output: toolOutput(state.content),
       metadata: state.metadata as Record<string, unknown> | undefined,
       title: readString(state.metadata, "title") ?? undefined,
+      timing,
     }
   }
   return {
@@ -60,6 +67,7 @@ function toolState(part: SessionMessageAssistantTool): ChatToolState {
     // projecting history.
     error: state.error?.message ?? "Tool failed",
     metadata: state.metadata as Record<string, unknown> | undefined,
+    timing,
   }
 }
 

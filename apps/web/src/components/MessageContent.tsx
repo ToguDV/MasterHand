@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm"
 import {
   formatSpeed,
   formatTokens,
+  isQuestionTool,
   isTaskTool,
   subagentInfo,
   subagentOutput,
@@ -16,7 +17,12 @@ import {
   type ChatReasoningPart,
   type ChatTextPart,
   type ChatToolPart,
+  type FormAnswer,
+  type FormInfo,
 } from "@masterhand/client-core"
+import { ToolCard } from "./tools/ToolCard"
+import { StatusDot } from "./tools/StatusDot"
+import { QuestionCard } from "./QuestionCard"
 
 // Assistant output is markdown; render it as such (GFM + single newlines as
 // breaks, matching what the model expects to see). Tailwind has no typography
@@ -90,48 +96,6 @@ function ReasoningBlock({ part }: { part: ChatReasoningPart }) {
   )
 }
 
-function statusDot(status: ChatToolPart["state"]["status"]): string {
-  return status === "completed"
-    ? "bg-emerald-400"
-    : status === "error"
-      ? "bg-red-400"
-      : status === "running"
-        ? "animate-pulse bg-amber-400"
-        : "bg-zinc-600"
-}
-
-function ToolCall({ part }: { part: ChatToolPart }) {
-  const [open, setOpen] = useState(false)
-  const state = part.state
-  const dot = statusDot(state.status)
-
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
-      >
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-        <span className="shrink-0 font-mono text-xs text-zinc-400">{part.tool}</span>
-        <span className="min-w-0 flex-1 truncate text-zinc-300">{toolTitle(part)}</span>
-        <span className="shrink-0 text-xs text-zinc-500">{state.status}</span>
-      </button>
-      {open && (
-        <div className="space-y-2 border-t border-zinc-800 px-3 py-2">
-          <pre className="scroll-thin overflow-x-auto text-xs text-zinc-400">{JSON.stringify(state.input, null, 2)}</pre>
-          {state.status === "completed" && state.output && (
-            <pre className="scroll-thin max-h-60 overflow-auto whitespace-pre-wrap border-t border-zinc-800 pt-2 text-xs text-zinc-300">
-              {state.output}
-            </pre>
-          )}
-          {state.status === "error" && <p className="text-xs text-red-400">{state.error}</p>}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function SubagentCall({
   part,
   onOpenSession,
@@ -145,13 +109,13 @@ function SubagentCall({
   const output = subagentOutput(part)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/5">
+    <div className="overflow-hidden rounded-xl border border-indigo-500/30 bg-indigo-500/5">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-indigo-500/10"
       >
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(state.status)}`} />
+        <StatusDot status={state.status} />
         <span className="shrink-0 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-300">
           Subagent
         </span>
@@ -164,7 +128,7 @@ function SubagentCall({
       </button>
 
       {open && (
-        <div className="space-y-2 border-t border-indigo-500/20 px-3 py-2">
+        <div className="mh-reveal space-y-2 border-t border-indigo-500/20 px-3 py-2">
           {info.prompt && (
             <div>
               <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Prompt</p>
@@ -200,24 +164,37 @@ function SubagentCall({
   )
 }
 
-function PartView({
-  part,
-  onOpenSession,
-}: {
+interface PartViewProps {
   part: ChatPart
   onOpenSession?: (id: string) => void
-}) {
+  forms: FormInfo[]
+  answeredForms: Array<{ form: FormInfo; answer: FormAnswer }>
+  busyFormID: string | null
+  onRespondForm?: (form: FormInfo, answer: FormAnswer) => void
+  onCancelForm?: (form: FormInfo) => void
+}
+
+function PartView({ part, onOpenSession, forms, answeredForms, busyFormID, onRespondForm, onCancelForm }: PartViewProps) {
   switch (part.type) {
     case "text":
       return <MarkdownText text={part.text} />
     case "reasoning":
       return <ReasoningBlock part={part} />
     case "tool":
-      return isTaskTool(part) ? (
-        <SubagentCall part={part} onOpenSession={onOpenSession} />
-      ) : (
-        <ToolCall part={part} />
-      )
+      if (isTaskTool(part)) return <SubagentCall part={part} onOpenSession={onOpenSession} />
+      if (isQuestionTool(part) && onRespondForm && onCancelForm) {
+        return (
+          <QuestionCard
+            part={part}
+            forms={forms}
+            answeredForms={answeredForms}
+            busyFormID={busyFormID}
+            onRespond={onRespondForm}
+            onCancel={onCancelForm}
+          />
+        )
+      }
+      return <ToolCard part={part} />
     default:
       return null
   }
@@ -241,9 +218,19 @@ export function UserBubble({ entry }: { entry: ChatMessage }) {
 export function AssistantBlock({
   entry,
   onOpenSession,
+  forms = [],
+  answeredForms = [],
+  busyFormID = null,
+  onRespondForm,
+  onCancelForm,
 }: {
   entry: ChatMessage
   onOpenSession?: (id: string) => void
+  forms?: FormInfo[]
+  answeredForms?: Array<{ form: FormInfo; answer: FormAnswer }>
+  busyFormID?: string | null
+  onRespondForm?: (form: FormInfo, answer: FormAnswer) => void
+  onCancelForm?: (form: FormInfo) => void
 }) {
   const visible = entry.parts
   const info = entry.info
@@ -256,7 +243,16 @@ export function AssistantBlock({
   return (
     <div className="flex flex-col gap-2">
       {visible.map((part) => (
-        <PartView key={part.id} part={part} onOpenSession={onOpenSession} />
+        <PartView
+          key={part.id}
+          part={part}
+          onOpenSession={onOpenSession}
+          forms={forms}
+          answeredForms={answeredForms}
+          busyFormID={busyFormID}
+          onRespondForm={onRespondForm}
+          onCancelForm={onCancelForm}
+        />
       ))}
 
       {streaming && visible.length === 0 && (
