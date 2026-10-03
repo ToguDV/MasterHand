@@ -4,6 +4,7 @@ import Markdown, { darkStyles, type MarkdownStyleMap } from "@ronradtke/react-na
 import {
   formatSpeed,
   formatTokens,
+  isQuestionTool,
   isTaskTool,
   subagentInfo,
   subagentOutput,
@@ -15,8 +16,13 @@ import {
   type ChatReasoningPart,
   type ChatTextPart,
   type ChatToolPart,
+  type FormAnswer,
+  type FormInfo,
 } from "@masterhand/client-core"
 import { colors } from "../theme"
+import { statusColor } from "./tools/theme"
+import { ToolCard } from "./tools/ToolCard"
+import { QuestionCard } from "./QuestionCard"
 
 // Assistant output is markdown: render it as such. The library ships a complete
 // dark preset; only the palette is overridden to match the app theme.
@@ -90,45 +96,6 @@ function Reasoning({ text }: { text: string }) {
   )
 }
 
-function statusColor(status: ChatToolPart["state"]["status"]): string {
-  return status === "completed"
-    ? colors.success
-    : status === "error"
-      ? colors.danger
-      : status === "running"
-        ? colors.warning
-        : colors.muted
-}
-
-function Tool({ part }: { part: ChatToolPart }) {
-  const [open, setOpen] = useState(false)
-  const state = part.state
-
-  return (
-    <View style={styles.toolCard}>
-      <Pressable style={styles.toolHeader} onPress={() => setOpen((value) => !value)}>
-        <View style={[styles.dot, { backgroundColor: statusColor(state.status) }]} />
-        <Text style={styles.toolName}>{part.tool}</Text>
-        <Text style={styles.toolTitle} numberOfLines={1}>
-          {toolTitle(part)}
-        </Text>
-        <Text style={styles.caption}>{state.status}</Text>
-      </Pressable>
-      {open && (
-        <View style={styles.toolBody}>
-          <Text style={styles.codeText}>{JSON.stringify(state.input, null, 2)}</Text>
-          {state.status === "completed" && state.output ? (
-            <Text style={[styles.codeText, styles.toolOutput]} numberOfLines={40}>
-              {state.output}
-            </Text>
-          ) : null}
-          {state.status === "error" ? <Text style={styles.errorText}>{state.error}</Text> : null}
-        </View>
-      )}
-    </View>
-  )
-}
-
 function Subagent({ part, onOpenSession }: { part: ChatToolPart; onOpenSession?: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const state = part.state
@@ -168,24 +135,37 @@ function Subagent({ part, onOpenSession }: { part: ChatToolPart; onOpenSession?:
   )
 }
 
-function PartView({
-  part,
-  onOpenSession,
-}: {
+interface PartViewProps {
   part: ChatPart
   onOpenSession?: (id: string) => void
-}) {
+  forms: FormInfo[]
+  answeredForms: Array<{ form: FormInfo; answer: FormAnswer }>
+  busyFormID: string | null
+  onRespondForm?: (form: FormInfo, answer: FormAnswer) => void
+  onCancelForm?: (form: FormInfo) => void
+}
+
+function PartView({ part, onOpenSession, forms, answeredForms, busyFormID, onRespondForm, onCancelForm }: PartViewProps) {
   switch (part.type) {
     case "text":
       return <MarkdownText text={part.text} />
     case "reasoning":
       return <Reasoning text={part.text} />
     case "tool":
-      return isTaskTool(part) ? (
-        <Subagent part={part} onOpenSession={onOpenSession} />
-      ) : (
-        <Tool part={part} />
-      )
+      if (isTaskTool(part)) return <Subagent part={part} onOpenSession={onOpenSession} />
+      if (isQuestionTool(part) && onRespondForm && onCancelForm) {
+        return (
+          <QuestionCard
+            part={part}
+            forms={forms}
+            answeredForms={answeredForms}
+            busyFormID={busyFormID}
+            onRespond={onRespondForm}
+            onCancel={onCancelForm}
+          />
+        )
+      }
+      return <ToolCard part={part} />
     default:
       return null
   }
@@ -194,9 +174,19 @@ function PartView({
 export function MessageBubble({
   entry,
   onOpenSession,
+  forms = [],
+  answeredForms = [],
+  busyFormID = null,
+  onRespondForm,
+  onCancelForm,
 }: {
   entry: ChatMessage
   onOpenSession?: (id: string) => void
+  forms?: FormInfo[]
+  answeredForms?: Array<{ form: FormInfo; answer: FormAnswer }>
+  busyFormID?: string | null
+  onRespondForm?: (form: FormInfo, answer: FormAnswer) => void
+  onCancelForm?: (form: FormInfo) => void
 }) {
   const info = entry.info
 
@@ -225,7 +215,16 @@ export function MessageBubble({
   return (
     <View style={styles.assistantBlock}>
       {visible.map((part) => (
-        <PartView key={part.id} part={part} onOpenSession={onOpenSession} />
+        <PartView
+          key={part.id}
+          part={part}
+          onOpenSession={onOpenSession}
+          forms={forms}
+          answeredForms={answeredForms}
+          busyFormID={busyFormID}
+          onRespondForm={onRespondForm}
+          onCancelForm={onCancelForm}
+        />
       ))}
       {streaming && visible.length === 0 ? <Text style={styles.caption}>Thinking…</Text> : null}
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
@@ -277,12 +276,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
-  toolCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-  },
   toolHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -294,11 +287,6 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-  },
-  toolName: {
-    color: colors.muted,
-    fontFamily: "monospace",
-    fontSize: 12,
   },
   toolTitle: {
     flex: 1,

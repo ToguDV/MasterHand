@@ -1,6 +1,6 @@
 # opencode server SSE events
 
-Verified on **2026-10-01** against a live **opencode v2.0.6** server and the generated types of [`@opencode/client@2.0.21`](https://www.npmjs.com/package/@opencode/client).
+Verified on **2026-10-01** against a live **opencode v2.0.6** server and the generated types of [`@opencode/client@2.0.21`](https://www.npmjs.com/package/@opencode/client). Form events (the `question` tool) re-verified on **2026-10-03** against a live **opencode v2.0.21** server.
 
 ## Connection
 
@@ -46,9 +46,12 @@ Verified on **2026-10-01** against a live **opencode v2.0.6** server and the gen
 | `session.tool.failed` | `{ …, id, error, content?, metadata? }` | Tool failed |
 | `permission.asked` | `Permission.Request` (see below) | **Approval modal + in-app notification** |
 | `permission.replied` | `{ sessionID, requestID, reply }` | Sync the answer across devices |
+| `form.created` | `{ form: Form.Info }` (see below) | **Agent question**: inline answer card for the `question` tool |
+| `form.replied` | `{ id, sessionID, answer }` | Mark the question answered (this or another device) |
+| `form.cancelled` | `{ id, sessionID }` | Mark the question dismissed |
 | `session.usage.updated` | `{ sessionID, cost, tokens }` | Session totals |
 
-Not consumed yet (present in v2): `session.compaction.*`, `session.shell.*`, `session.revert.*`, `session.skill.*`, `session.inbox.*`, `filesystem.changed`, `worktree.*`, `vcs.branch.updated`, `pty.*`, `mcp.*`, `form.*`, `installation.*`, `tui.*`.
+Not consumed yet (present in v2): `session.compaction.*`, `session.shell.*`, `session.revert.*`, `session.skill.*`, `session.inbox.*`, `filesystem.changed`, `worktree.*`, `vcs.branch.updated`, `pty.*`, `mcp.*`, `installation.*`, `tui.*`.
 
 ## Streaming model
 
@@ -94,6 +97,44 @@ Real captured event:
 
 Answer with `POST /api/session/:id/permission/:requestID/reply` and body `{ "decision": "once" | "always" | "reject" }`.
 
+### Question forms (`form.created` / the `question` tool)
+
+opencode v2 has **no `question.*` endpoints**: the agent's `question` tool creates a *form* and blocks the turn until it is replied to or cancelled. Verified against a live **2.0.21** server: `metadata.kind === "question"`, `metadata.tool.id` matches the tool part's `callID`, and a reply resumes the turn.
+
+`Form.Info` (as carried by `form.created`, `GET /api/form` and `GET /api/session/:id/form`):
+
+```ts
+{
+  id: string            // "frm_…"
+  sessionID: string
+  title: string         // "Questions"
+  metadata?: {
+    kind: "question"                        // other kinds exist (e.g. MCP elicitation)
+    tool: { messageID: string; id: string } // id === the question tool callID
+  }
+  fields: Form.Field[]  // non-empty
+}
+```
+
+`Form.Field` is a union on `type`:
+
+- `string`: `options?: { value, label, description? }[]`, `custom?`, `placeholder?`, `format?` (`email | uri | date | date-time`), `minLength`/`maxLength`/`pattern`, `default?`
+- `number` / `integer`: `minimum?` / `maximum?` / `default?`
+- `boolean`: `default?`
+- `multiselect`: `options` (required), `minItems?` / `maxItems?` / `custom?` / `default?`
+- `external`: `url` (informational, not answerable)
+
+Every field also has `key`, `title?`, `description?`, `required?`, `hidden?` and `when?: { key, op: "eq" | "neq", value }[]` (conditional visibility).
+
+The `question` tool maps its input to fields as follows: `key = q<index>`, `title = question.header`, `description = question.question`, `type = multiple ? "multiselect" : "string"`, option `value = label`, and `custom: true`.
+
+API (reachable through the BFF `/api/oc` proxy):
+
+- List pending forms: `GET /api/form?location[directory]=<abs-path>` → `Form.Info[]`; per session: `GET /api/session/:id/form`.
+- One form with its state: `GET /api/session/:id/form/:formID` → `Form.Detail` with `state: { status: "pending" } | { status: "answered"; answer } | { status: "cancelled"; message? }`.
+- Reply: `POST /api/session/:id/form/:formID/reply` body `{ "answer": { "<key>": <Form.Value> } }` (`string | number | boolean | string[]`).
+- Cancel: `DELETE /api/session/:id/form/:formID`.
+
 ### `SessionStatus` (`session.status`)
 
 ```ts
@@ -114,4 +155,5 @@ Verified on **2.0.6** with a live run:
 ## Integration notes
 
 - List pending permissions: `GET /api/permission/request?location[directory]=<abs-path>` returns `Permission.Request[]`. It is per location — reconcile each workspace (base folder and worktrees), because SSE never replays.
+- List pending forms: `GET /api/form?location[directory]=<abs-path>` returns `Form.Info[]`. The agent is blocked until the form is replied to or cancelled, so reconcile it exactly like permissions.
 - The UI must not rely on SSE alone for consistency: on open or reconnect, load history with `GET /api/session/:id/message` and pending permissions with the endpoint above.

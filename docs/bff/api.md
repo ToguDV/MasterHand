@@ -98,6 +98,9 @@ curl -X POST https://your-origin.example/api/oc/api/session/<id>/prompt \
 # answer permission
 curl -X POST https://your-origin.example/api/oc/api/session/<id>/permission/<requestID>/reply \
   -H 'content-type: application/json' -d '{"decision":"once"}'
+# reply to a form (the agent's `question` tool); keys come from the form's fields
+curl -X POST https://your-origin.example/api/oc/api/session/<id>/form/<formID>/reply \
+  -H 'content-type: application/json' -d '{"answer":{"q0":"Postgres"}}'
 # list pending permissions for a workspace (to reconcile missed SSE events)
 curl 'https://your-origin.example/api/oc/api/permission/request?location%5Bdirectory%5D=/workspace/my-app'
 # native login (device token)

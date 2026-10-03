@@ -9,6 +9,9 @@ import type {
   DeviceLoginResponse,
   DeviceRecord,
   FinishSessionResult,
+  FormAnswer,
+  FormDetail,
+  FormInfo,
   ModelsCatalog,
   Permission as PermissionType,
   PreviewStatus,
@@ -89,6 +92,20 @@ export interface Client {
       permissionID: string,
       response: PermissionResponse,
     ): Promise<void>
+    /**
+     * Pending forms of a session (the primitive behind the agent's `question`
+     * tool). `form.created` events are not replayed, so the clients reconcile
+     * with `pendingForms` when they (re)connect.
+     */
+    forms(sessionID: string): Promise<FormInfo[]>
+    /** One form with its current state (pending / answered / cancelled). */
+    form(sessionID: string, formID: string): Promise<FormDetail>
+    /** Replies to a form; the agent's turn resumes with the answer. */
+    respondForm(sessionID: string, formID: string, answer: FormAnswer): Promise<void>
+    /** Cancels a form; opencode reports it back to the agent. */
+    cancelForm(sessionID: string, formID: string): Promise<void>
+    /** Every pending form of a location (workspace folder or worktree). */
+    pendingForms(directory?: string | null): Promise<FormInfo[]>
     agents(): Promise<AgentInfo[]>
     /** Slash commands for a location, with deterministic argument hints. */
     commands(directory?: string | null): Promise<SlashCommand[]>
@@ -309,6 +326,15 @@ export function createClient(options: ClientOptions = {}): Client {
       respondPermission: (sessionID, permissionID, response) =>
         opencodeRequest(() =>
           opencode.permission.reply({ sessionID, requestID: permissionID, decision: response }),
+        ),
+      forms: (sessionID) => opencodeRequest(() => opencode.session.form.list({ sessionID })),
+      form: (sessionID, formID) => opencodeRequest(() => opencode.session.form.get({ sessionID, formID })),
+      respondForm: (sessionID, formID, answer) =>
+        opencodeRequest(() => opencode.session.form.reply({ sessionID, formID, answer })),
+      cancelForm: (sessionID, formID) => opencodeRequest(() => opencode.session.form.cancel({ sessionID, formID })),
+      pendingForms: (directory) =>
+        opencodeRequest(() =>
+          opencode.form.list(directory ? { location: { directory } } : undefined).then((response) => response.data),
         ),
       agents: () =>
         opencodeRequest(() =>

@@ -13,6 +13,7 @@ import {
 import { opencodeErrorMessage } from "./errors"
 import type {
   ChatMessage,
+  FormInfo,
   Permission,
   SessionStatuses,
   SessionStructuredError,
@@ -150,6 +151,10 @@ export function usePreview(client: Client, sessionID: string | null, enabled = t
 export interface EventHandlerCallbacks {
   onPermission?: (permission: Permission) => void
   onPermissionReplied?: (permissionID: string) => void
+  /** A form was created (the agent's `question` tool is waiting for input). */
+  onForm?: (form: FormInfo) => void
+  /** A form was replied to or cancelled, on this or another device. */
+  onFormSettled?: (formID: string) => void
   onSessionError?: (message: string) => void
   /** opencode (re)connected upstream: reconcile state that SSE never replays. */
   onServerConnected?: () => void
@@ -225,6 +230,8 @@ export function createEventHandler(
   return (raw) => {
     if (!raw || typeof raw !== "object") return
     const event = raw as V2Event
+    // Single timestamp per event: the tool cases stamp live timing with it.
+    const eventNow = Date.now()
 
     const setStatus = (sessionID: string, status: SessionStatuses[string]) => {
       statusWritesOf(queryClient).set(sessionID, Date.now())
@@ -262,6 +269,13 @@ export function createEventHandler(
         return
       case "permission.replied":
         callbacks.onPermissionReplied?.(event.data.requestID)
+        return
+      case "form.created":
+        callbacks.onForm?.(event.data.form as FormInfo)
+        return
+      case "form.replied":
+      case "form.cancelled":
+        callbacks.onFormSettled?.(event.data.id)
         return
       case "session.created":
       case "session.renamed":
@@ -404,8 +418,24 @@ export function createEventHandler(
             event.data.sessionID,
             event.data.assistantMessageID,
             event.data.id,
-            (part) => ({ ...part, state: { ...part.state, status: "running", input: event.data.input } }),
-            (part) => ({ ...part, state: { status: "running", input: event.data.input } }),
+            (part) => ({
+              ...part,
+              state: {
+                ...part.state,
+                status: "running",
+                input: event.data.input,
+                timing: {
+                  ...part.state.timing,
+                  created: part.state.timing?.created ?? eventNow,
+                  ran: part.state.timing?.ran ?? eventNow,
+                },
+              },
+            }),
+            (part) => ({
+              ...part,
+              state: { status: "running", input: event.data.input, timing: { created: eventNow, ran: eventNow } },
+            }),
+            eventNow,
           ),
         )
         return
@@ -435,6 +465,7 @@ export function createEventHandler(
                 status: "completed",
                 output: toolContentText(event.data.content),
                 metadata: event.data.metadata,
+                timing: { ...part.state.timing, completed: eventNow },
               },
             }),
             (part) => ({
@@ -444,8 +475,10 @@ export function createEventHandler(
                 input: {},
                 output: toolContentText(event.data.content),
                 metadata: event.data.metadata,
+                timing: { created: eventNow, completed: eventNow },
               },
             }),
+            eventNow,
           ),
         )
         return
@@ -464,6 +497,7 @@ export function createEventHandler(
                 error: event.data.error.message,
                 output: toolContentText(event.data.content),
                 metadata: event.data.metadata,
+                timing: { ...part.state.timing, completed: eventNow },
               },
             }),
             (part) => ({
@@ -474,8 +508,10 @@ export function createEventHandler(
                 error: event.data.error.message,
                 output: toolContentText(event.data.content),
                 metadata: event.data.metadata,
+                timing: { created: eventNow, completed: eventNow },
               },
             }),
+            eventNow,
           ),
         )
         return

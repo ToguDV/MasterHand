@@ -73,12 +73,22 @@ interface PendingPermission {
   resolve: (decision: string) => void
 }
 
+/** A v2 form (the primitive behind the agent's `question` tool) awaiting a reply. */
+interface PendingForm {
+  info: Record<string, unknown>
+  sessionID: string
+  directory: string
+  /** `null` means cancelled. */
+  resolve: (answer: Record<string, unknown> | null) => void
+}
+
 const sseClients = new Set<ServerResponse>()
 const sessions = new Map<string, SessionRecord>()
 const conversations = new Map<string, SessionMessage[]>()
 /** Order of the first message page per session (cursor pages inherit it). */
 const messageOrders = new Map<string, string>()
 const pendingPermissions = new Map<string, PendingPermission>()
+const pendingForms = new Map<string, PendingForm>()
 const activeRuns = new Set<string>()
 
 // E2E control: makes the mock unreachable (503) and drops its SSE clients, so
@@ -341,6 +351,230 @@ async function runSubagentPrompt(sessionID: string, text: string): Promise<void>
   activeRuns.delete(sessionID)
 }
 
+/** Streams a sequence of tool calls (shell, read, write, edit) and a wrap-up text. */
+async function runToolsPrompt(sessionID: string): Promise<void> {
+  const session = sessions.get(sessionID)
+  if (!session) return
+  const directory = session.location.directory
+
+  activeRuns.add(sessionID)
+  broadcast("session.execution.started", { sessionID }, directory)
+  await delay(30)
+
+  const assistant = appendAssistantMessage(sessionID)
+  const tools: AssistantTool[] = []
+  assistant.content = tools
+
+  async function runTool(
+    name: string,
+    input: Record<string, unknown>,
+    output: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    const id = nextId("prt")
+    const created = now()
+    broadcast(
+      "session.tool.input.started",
+      { sessionID, assistantMessageID: assistant.id, id, name },
+      directory,
+    )
+    const tool: AssistantTool = {
+      type: "tool",
+      id,
+      name,
+      executed: true,
+      state: { status: "running", input, metadata, time: { created } },
+      time: { created },
+    }
+    tools.push(tool)
+    await delay(20)
+    broadcast(
+      "session.tool.called",
+      { sessionID, assistantMessageID: assistant.id, id, input, executed: true },
+      directory,
+    )
+    await delay(40)
+    const ran = now()
+    tool.state = {
+      status: "completed",
+      input,
+      content: [{ type: "text", text: output }],
+      metadata,
+      time: { created, ran },
+    }
+    tool.time = { created, ran, completed: now() }
+    broadcast(
+      "session.tool.success",
+      {
+        sessionID,
+        assistantMessageID: assistant.id,
+        id,
+        content: [{ type: "text", text: output }],
+        metadata,
+        executed: true,
+      },
+      directory,
+    )
+  }
+
+  await runTool("bash", { command: "npm test -- --run", description: "Run the test suite" }, "Tests passed", {
+    exitCode: 0,
+  })
+  await runTool(
+    "read",
+    { filePath: "src/app.ts" },
+    "Read file src/app.ts, lines 1-2\n1: export const app = 1\n2: export const port = 3000",
+  )
+  await runTool("write", { filePath: "src/new.ts", content: "export const answer = 42" }, "File written")
+  await runTool(
+    "edit",
+    { filePath: "src/app.ts", oldString: "const value = 1", newString: "const value = 2\nconst more = 3" },
+    "Edit applied",
+  )
+
+  const text = "All tools done."
+  assistant.content = [...tools, { type: "text", text }]
+  streamText(sessionID, assistant.id, 0, text)
+  completeAssistant(session, assistant, {
+    cost: 0.003,
+    tokens: { input: 10, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+  activeRuns.delete(sessionID)
+}
+
+/**
+ * Streams a `question` tool backed by a v2 form and blocks until the client
+ * replies (or cancels) through `POST /api/session/:id/form/:formID/reply`.
+ */
+async function runQuestionPrompt(sessionID: string): Promise<void> {
+  const session = sessions.get(sessionID)
+  if (!session) return
+
+  activeRuns.add(sessionID)
+  broadcast("session.execution.started", { sessionID }, session.location.directory)
+  await delay(30)
+
+  const assistant = appendAssistantMessage(sessionID)
+  const callID = nextId("prt")
+  const created = now()
+  const input = {
+    questions: [
+      {
+        header: "Database",
+        question: "Which database should the project use?",
+        options: [
+          { label: "Postgres", description: "Relational, battle tested" },
+          { label: "SQLite", description: "Zero setup" },
+        ],
+        multiple: false,
+      },
+    ],
+  }
+  broadcast(
+    "session.tool.input.started",
+    { sessionID, assistantMessageID: assistant.id, id: callID, name: "question" },
+    session.location.directory,
+  )
+  await delay(20)
+  const tool: AssistantTool = {
+    type: "tool",
+    id: callID,
+    name: "question",
+    executed: true,
+    state: { status: "running", input, metadata: {}, time: { created } },
+    time: { created },
+  }
+  assistant.content = [tool]
+  broadcast(
+    "session.tool.called",
+    { sessionID, assistantMessageID: assistant.id, id: callID, input, executed: true },
+    session.location.directory,
+  )
+
+  const formID = nextId("frm")
+  const form = {
+    id: formID,
+    sessionID,
+    title: "Questions",
+    metadata: { kind: "question", tool: { messageID: assistant.id, id: callID } },
+    fields: [
+      {
+        // Real mapping of the `question` tool: key `qN`, title = header,
+        // description = the question itself, option values = labels.
+        key: "q0",
+        type: "string",
+        title: "Database",
+        description: "Which database should the project use?",
+        required: true,
+        options: [
+          { label: "Postgres", value: "Postgres", description: "Relational, battle tested" },
+          { label: "SQLite", value: "SQLite", description: "Zero setup" },
+        ],
+        custom: true,
+      },
+      {
+        key: "q1",
+        type: "string",
+        title: "Notes",
+        description: "Anything else?",
+        options: [],
+        custom: true,
+      },
+    ],
+  }
+  const answer = await new Promise<Record<string, unknown> | null>((resolve) => {
+    pendingForms.set(formID, { info: form, sessionID, directory: session.location.directory, resolve })
+    broadcast("form.created", { form }, session.location.directory)
+  })
+  pendingForms.delete(formID)
+
+  if (answer) broadcast("form.replied", { id: formID, sessionID, answer }, session.location.directory)
+  else broadcast("form.cancelled", { id: formID, sessionID }, session.location.directory)
+
+  const ran = now()
+  const output = answer ? `Answered: ${JSON.stringify(answer)}` : "Question dismissed"
+  tool.state = answer
+    ? { status: "completed", input, content: [{ type: "text", text: output }], metadata: {}, time: { created, ran } }
+    : { status: "error", input, error: { type: "QuestionCancelled", message: "Dismissed" }, metadata: {}, time: { created, ran } }
+  tool.time = { created, ran, completed: now() }
+
+  if (answer) {
+    broadcast(
+      "session.tool.success",
+      {
+        sessionID,
+        assistantMessageID: assistant.id,
+        id: callID,
+        content: [{ type: "text", text: output }],
+        metadata: {},
+        executed: true,
+      },
+      session.location.directory,
+    )
+  } else {
+    broadcast(
+      "session.tool.failed",
+      {
+        sessionID,
+        assistantMessageID: assistant.id,
+        id: callID,
+        error: { type: "QuestionCancelled", message: "Dismissed" },
+        metadata: {},
+        executed: true,
+      },
+      session.location.directory,
+    )
+  }
+
+  await delay(20)
+  assistant.content = [tool, { type: "text", text: answer ? "Thanks, moving on." : "Question dismissed." }]
+  completeAssistant(session, assistant, {
+    cost: 0.001,
+    tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+  activeRuns.delete(sessionID)
+}
+
 /** Streams a markdown-rich reply (exercised by `markdown.spec.ts`). */
 async function runMarkdownPrompt(sessionID: string): Promise<void> {
   const session = sessions.get(sessionID)
@@ -386,6 +620,8 @@ async function runPrompt(sessionID: string, text: string): Promise<void> {
 
   if (text.toLowerCase().includes("subagent")) return runSubagentPrompt(sessionID, text)
   if (text.toLowerCase().includes("markdown")) return runMarkdownPrompt(sessionID)
+  if (text.toLowerCase().includes("question")) return runQuestionPrompt(sessionID)
+  if (text.toLowerCase().includes("tool")) return runToolsPrompt(sessionID)
 
   activeRuns.add(sessionID)
   broadcast("session.execution.started", { sessionID }, session.location.directory)
@@ -550,6 +786,13 @@ const server = createServer((req, res) => {
         .map((pending) => pending.request)
       return json(res, 200, { location: { directory: directory ?? "/e2e" }, data: list })
     }
+    if (req.method === "GET" && path === "/api/form") {
+      const directory = url.searchParams.get("location[directory]")
+      const list = [...pendingForms.values()]
+        .filter((pending) => !directory || pending.directory === directory)
+        .map((pending) => pending.info)
+      return json(res, 200, { location: { directory: directory ?? "/e2e" }, data: list })
+    }
     if (req.method === "GET" && path === "/api/agent") {
       return json(res, 200, { location: { directory: "/e2e" }, data: AGENTS })
     }
@@ -703,6 +946,37 @@ const server = createServer((req, res) => {
         }
         return empty(res, 204)
       }
+      {
+        const formID = segments[3] === "form" && segments[4] ? decodeURIComponent(segments[4]) : null
+        if (req.method === "GET" && segments[3] === "form" && formID === null) {
+          const list = [...pendingForms.values()]
+            .filter((pending) => pending.sessionID === sessionID)
+            .map((pending) => pending.info)
+          return json(res, 200, { data: list })
+        }
+        if (req.method === "GET" && formID !== null) {
+          const pending = pendingForms.get(formID)
+          if (!pending) return json(res, 404, { error: "not_found" })
+          return json(res, 200, { data: { ...pending.info, state: { status: "pending" } } })
+        }
+        if (req.method === "POST" && formID !== null && segments[5] === "reply") {
+          const body = await readBody(req)
+          const pending = pendingForms.get(formID)
+          if (pending) {
+            pendingForms.delete(formID)
+            pending.resolve((body.answer ?? {}) as Record<string, unknown>)
+          }
+          return empty(res, 204)
+        }
+        if (req.method === "DELETE" && formID !== null) {
+          const pending = pendingForms.get(formID)
+          if (pending) {
+            pendingForms.delete(formID)
+            pending.resolve(null)
+          }
+          return empty(res, 204)
+        }
+      }
       if (req.method === "PATCH") {
         // MasterHand sets the session's external-write guard right after creation.
         await readBody(req)
@@ -715,6 +989,9 @@ const server = createServer((req, res) => {
         activeRuns.delete(sessionID)
         for (const [id, pending] of pendingPermissions) {
           if (pending.sessionID === sessionID) pendingPermissions.delete(id)
+        }
+        for (const [id, pending] of pendingForms) {
+          if (pending.sessionID === sessionID) pendingForms.delete(id)
         }
         broadcast("session.deleted", { sessionID }, session?.location.directory)
         return empty(res, 204)

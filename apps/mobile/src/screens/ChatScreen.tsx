@@ -11,6 +11,8 @@ import {
   type ChatMessage,
   type Client,
   type FinishSessionResult,
+  type FormAnswer,
+  type FormInfo,
   type SessionIsolation,
 } from "@masterhand/client-core"
 import { Composer } from "../components/Composer"
@@ -33,6 +35,13 @@ export function ChatScreen({
   onOpenSession,
   parentSessionID,
   onBack,
+  forms = [],
+  answeredForms = [],
+  busyFormID = null,
+  onRespondForm,
+  onCancelForm,
+  waitingQuestion = false,
+  onOpenWaiting,
 }: {
   client: Client
   sessionID: string
@@ -47,6 +56,14 @@ export function ChatScreen({
   onOpenSession?: (id: string) => void
   parentSessionID?: string | null
   onBack: () => void
+  forms?: FormInfo[]
+  answeredForms?: Array<{ form: FormInfo; answer: FormAnswer }>
+  busyFormID?: string | null
+  onRespondForm?: (form: FormInfo, answer: FormAnswer) => void
+  onCancelForm?: (form: FormInfo) => void
+  /** A question from another session is blocking its agent. */
+  waitingQuestion?: boolean
+  onOpenWaiting?: () => void
 }) {
   const queryClient = useQueryClient()
   const messagesQuery = useMessages(client, sessionID, { busy, connected })
@@ -93,6 +110,15 @@ export function ChatScreen({
         <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.warning }]} />
       </View>
 
+      {waitingQuestion ? (
+        <Pressable style={styles.waitingBar} onPress={onOpenWaiting}>
+          <View style={styles.waitingDot} />
+          <Text style={styles.waitingText} numberOfLines={1}>
+            The agent is waiting for your answer · Open session
+          </Text>
+        </Pressable>
+      ) : null}
+
       <FlatList
         ref={listRef}
         data={messages}
@@ -107,7 +133,17 @@ export function ChatScreen({
             <Text style={styles.empty}>Write a message to start working with the agent.</Text>
           )
         }
-        renderItem={({ item }) => <MessageBubble entry={item} onOpenSession={onOpenSession} />}
+        renderItem={({ item }) => (
+          <MessageBubble
+            entry={item}
+            onOpenSession={onOpenSession}
+            forms={forms}
+            answeredForms={answeredForms}
+            busyFormID={busyFormID}
+            onRespondForm={onRespondForm}
+            onCancelForm={onCancelForm}
+          />
+        )}
       />
 
       {(usage.cost > 0 || tokenBreakdown) ? (
@@ -210,6 +246,27 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  waitingBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(99, 102, 241, 0.4)",
+    backgroundColor: "rgba(99, 102, 241, 0.12)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  waitingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+  },
+  waitingText: {
+    flex: 1,
+    color: "#c7d2fe",
+    fontSize: 11,
   },
   previewButton: {
     backgroundColor: "rgba(99, 102, 241, 0.15)",

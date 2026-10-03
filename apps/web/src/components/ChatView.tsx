@@ -8,6 +8,8 @@ import {
   tokenSpeed,
   useMessages,
   type FinishSessionResult,
+  type FormAnswer,
+  type FormInfo,
   type SessionIsolation,
 } from "@masterhand/client-core"
 import { client } from "../client"
@@ -28,6 +30,11 @@ export function ChatView({
   autoAccept,
   onToggleAutoAccept,
   onOpenSession,
+  forms,
+  answeredForms,
+  busyFormID,
+  onRespondForm,
+  onCancelForm,
 }: {
   sessionID: string
   busy: boolean
@@ -38,6 +45,11 @@ export function ChatView({
   autoAccept: boolean
   onToggleAutoAccept: (on: boolean) => void
   onOpenSession?: (id: string) => void
+  forms: FormInfo[]
+  answeredForms: Array<{ form: FormInfo; answer: FormAnswer }>
+  busyFormID: string | null
+  onRespondForm: (form: FormInfo, answer: FormAnswer) => void
+  onCancelForm: (form: FormInfo) => void
 }) {
   const queryClient = useQueryClient()
   const messagesQuery = useMessages(client, sessionID, { busy, connected })
@@ -113,7 +125,16 @@ export function ChatView({
             entry.info.role === "user" ? (
               <UserBubble key={entry.info.id} entry={entry} />
             ) : (
-              <AssistantBlock key={entry.info.id} entry={entry} onOpenSession={onOpenSession} />
+              <AssistantBlock
+                key={entry.info.id}
+                entry={entry}
+                onOpenSession={onOpenSession}
+                forms={forms}
+                answeredForms={answeredForms}
+                busyFormID={busyFormID}
+                onRespondForm={onRespondForm}
+                onCancelForm={onCancelForm}
+              />
             ),
           )}
         </div>

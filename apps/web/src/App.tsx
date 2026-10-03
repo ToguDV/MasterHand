@@ -3,7 +3,9 @@ import { useQueryClient } from "@tanstack/react-query"
 import {
   ApiError,
   createEventHandler,
+  formIsQuestion,
   invalidateOnReconnect,
+  reconcileForms,
   reconcilePermissions,
   useBffStatus,
   useEventStream,
@@ -12,6 +14,8 @@ import {
   useSessionStatuses,
   useWorkspaces,
   type CreateWorkspaceInput,
+  type FormAnswer,
+  type FormInfo,
   type Permission,
 } from "@masterhand/client-core"
 import { client } from "./client"
@@ -58,6 +62,9 @@ export default function App() {
   const [removingWorkspace, setRemovingWorkspace] = useState(false)
   const [connected, setConnected] = useState(false)
   const [permissions, setPermissions] = useState<Permission[]>([])
+  const [forms, setForms] = useState<FormInfo[]>([])
+  const [answeredForms, setAnsweredForms] = useState<Array<{ form: FormInfo; answer: FormAnswer }>>([])
+  const [busyFormID, setBusyFormID] = useState<string | null>(null)
   const [responding, setResponding] = useState(false)
   const [creating, setCreating] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
@@ -68,6 +75,8 @@ export default function App() {
   const autoAcceptSessionsRef = useRef(autoAcceptSessions)
   autoAcceptSessionsRef.current = autoAcceptSessions
   const answeringRef = useRef(new Set<string>())
+  const formsRef = useRef(forms)
+  formsRef.current = forms
 
   /** Answers a permission request automatically ("once", reversible). */
   const answerAuto = useCallback(async (permission: Permission) => {
@@ -110,8 +119,11 @@ export default function App() {
         },
         onPermissionReplied: (permissionID) =>
           setPermissions((prev) => prev.filter((item) => item.id !== permissionID)),
+        onForm: (form) =>
+          setForms((prev) => (prev.some((item) => item.id === form.id) ? prev : [...prev, form])),
+        onFormSettled: (formID) => setForms((prev) => prev.filter((item) => item.id !== formID)),
         onSessionError: (message) => setBanner(message),
-        onServerConnected: () => void syncPermissionsRef.current(),
+        onServerConnected: () => void syncPendingRef.current(),
       }),
     [queryClient],
   )
@@ -152,45 +164,52 @@ export default function App() {
   const directoriesQuery = useSessionDirectories(client, authed === true, workspaceID)
   const sessionsQuery = useSessions(client, authed === true, 10_000, workspaceID)
 
-  // `permission.asked` events are lost while disconnected and never replayed.
-  // On connect (and once workspaces load) reconcile against opencode, which
-  // exposes pending requests per directory (workspace folder + worktrees).
-  const syncPermissions = useCallback(async () => {
+  // `permission.asked` and `form.created` events are lost while disconnected
+  // and never replayed. On connect (and once workspaces load) reconcile against
+  // opencode, which exposes pending permissions and forms per directory
+  // (workspace folder + worktrees).
+  const syncPending = useCallback(async () => {
     const directories = directoriesQuery.data ?? (workspacePath ? [workspacePath] : [])
     if (directories.length === 0) return
 
-    // A directory that fails to answer must not look like "no pending
-    // requests": it stays out of the covered set, so its live permissions are
-    // kept instead of pruned.
+    // A directory that fails to answer must not look like "nothing pending":
+    // it stays out of the covered set, so its live state is kept instead of
+    // pruned. Permissions and forms are fetched together so one slow endpoint
+    // cannot make the other look abandoned.
+    type DirectorySnapshot = { directory: string; permissions: Permission[]; forms: FormInfo[] }
     const results = await Promise.all(
-      directories.map(async (directory): Promise<{ directory: string; pending: Permission[] | null }> => {
+      directories.map(async (directory): Promise<DirectorySnapshot | null> => {
         try {
-          return { directory, pending: await client.api.permissions(directory) }
+          const [permissions, forms] = await Promise.all([
+            client.api.permissions(directory),
+            client.api.pendingForms(directory),
+          ])
+          return { directory, permissions, forms }
         } catch {
-          return { directory, pending: null }
+          return null
         }
       }),
     )
-    const answered = results.filter(
-      (result): result is { directory: string; pending: Permission[] } => result.pending !== null,
-    )
+    const answered = results.filter((result): result is DirectorySnapshot => result !== null)
     if (answered.length === 0) return
 
-    const snapshot = answered.flatMap((result) => result.pending)
     const covered = new Set(
       (sessionsQuery.data ?? [])
         .filter((session) => answered.some((result) => result.directory === session.location.directory))
         .map((session) => session.id),
     )
-    setPermissions((prev) => reconcilePermissions(prev, snapshot, covered))
+    setPermissions((prev) =>
+      reconcilePermissions(prev, answered.flatMap((result) => result.permissions), covered),
+    )
+    setForms((prev) => reconcileForms(prev, answered.flatMap((result) => result.forms), covered))
   }, [client, directoriesQuery.data, workspacePath, sessionsQuery.data])
-  const syncPermissionsRef = useRef(syncPermissions)
-  syncPermissionsRef.current = syncPermissions
+  const syncPendingRef = useRef(syncPending)
+  syncPendingRef.current = syncPending
 
   const handleConnect = useCallback(() => {
     invalidateOnReconnect(queryClient)
-    void syncPermissions()
-  }, [queryClient, syncPermissions])
+    void syncPending()
+  }, [queryClient, syncPending])
 
   useEventStream(client, {
     enabled: authed === true,
@@ -201,8 +220,8 @@ export default function App() {
 
   useEffect(() => {
     if (authed !== true || !workspacesQuery.data) return
-    void syncPermissions()
-  }, [authed, workspacesQuery.data, syncPermissions])
+    void syncPending()
+  }, [authed, workspacesQuery.data, syncPending])
 
   useEffect(() => {
     try {
@@ -257,11 +276,15 @@ export default function App() {
   const selected = sessions.find((session) => session.id === sessionID) ?? null
   const parentSessionID = selected?.parentID ?? null
   const busy = sessionID ? statuses[sessionID]?.type === "busy" : false
+  // A question raised in another session still blocks its agent: surface it.
+  const waitingForm = forms.find((form) => formIsQuestion(form) && form.sessionID !== sessionID) ?? null
 
   const handleLogout = useCallback(async () => {
     await client.auth.logout().catch(() => {})
     queryClient.clear()
     setPermissions([])
+    setForms([])
+    setAnsweredForms([])
     setAuthed(false)
     openSession(null)
   }, [queryClient, openSession])
@@ -337,6 +360,36 @@ export default function App() {
     }
   }
 
+  async function respondForm(form: FormInfo, answer: FormAnswer) {
+    setBusyFormID(form.id)
+    setBanner(null)
+    try {
+      // The form id resolves the question regardless of the active workspace.
+      await client.api.respondForm(form.sessionID, form.id, answer)
+      setForms((prev) => prev.filter((item) => item.id !== form.id))
+      // Keep the local answer so the inline card can render it read-only.
+      setAnsweredForms((prev) =>
+        [...prev.filter((entry) => entry.form.id !== form.id), { form, answer }].slice(-50),
+      )
+    } catch {
+      setBanner("Could not answer the question")
+    } finally {
+      setBusyFormID(null)
+    }
+  }
+
+  async function cancelForm(form: FormInfo) {
+    setBusyFormID(form.id)
+    try {
+      await client.api.cancelForm(form.sessionID, form.id)
+      setForms((prev) => prev.filter((item) => item.id !== form.id))
+    } catch {
+      setBanner("Could not dismiss the question")
+    } finally {
+      setBusyFormID(null)
+    }
+  }
+
   if (authed === null) {
     return (
       <main className="flex min-h-dvh items-center justify-center">
@@ -400,6 +453,17 @@ export default function App() {
         </div>
       )}
 
+      {waitingForm && (
+        <button
+          type="button"
+          onClick={() => openSession(waitingForm.sessionID)}
+          className="flex items-center gap-2 border-b border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-left text-xs text-indigo-200 hover:bg-indigo-500/15"
+        >
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-indigo-400" />
+          <span className="min-w-0 flex-1 truncate">The agent is waiting for your answer · Open session</span>
+        </button>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <aside
           className={`${sessionID ? "hidden md:flex" : "flex"} w-full min-h-0 flex-col border-r border-zinc-800 md:w-72 md:shrink-0`}
@@ -436,6 +500,11 @@ export default function App() {
               autoAccept={autoAcceptSessions.includes(sessionID)}
               onToggleAutoAccept={(on) => toggleAutoAccept(sessionID, on)}
               onOpenSession={openSession}
+              forms={forms}
+              answeredForms={answeredForms}
+              busyFormID={busyFormID}
+              onRespondForm={(form, answer) => void respondForm(form, answer)}
+              onCancelForm={(form) => void cancelForm(form)}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-zinc-500">
