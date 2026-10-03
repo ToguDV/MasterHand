@@ -204,6 +204,26 @@ describe("Composer", () => {
     expect(client.api.prompt).not.toHaveBeenCalled()
   })
 
+  it("lists every argument value while the parameter is empty", async () => {
+    const commands: SlashCommand[] = [
+      {
+        name: "review",
+        description: "review changes [commit|branch|pr]",
+        arguments: [{ position: 1, freeForm: false, suggestions: ["commit", "branch", "pr"] }],
+      },
+    ]
+    await setup({}, { commands })
+    const input = await screen.findByPlaceholderText("Write a message…")
+
+    await fireEvent.changeText(input, "/rev")
+    await fireEvent.press(await screen.findByText("/review"))
+
+    // Picking the command leaves an empty parameter: list all of its values.
+    expect(await screen.findByText("commit")).toBeOnTheScreen()
+    expect(screen.getByText("branch")).toBeOnTheScreen()
+    expect(screen.getByText("pr")).toBeOnTheScreen()
+  })
+
   it("hides argument suggestions that do not match the typed content", async () => {
     const commands: SlashCommand[] = [
       {

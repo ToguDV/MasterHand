@@ -36,6 +36,19 @@ test("opens the subagent list on @ and inserts the mention", async ({ page }) =>
   await expect(composer).toHaveValue("@general ")
 })
 
+test("lists every argument value while the parameter is empty", async ({ page }) => {
+  await login(page)
+  await addWorkspace(page)
+  await page.getByRole("button", { name: "+ New" }).click()
+
+  const composer = page.getByPlaceholder("Write a message…")
+  await composer.fill("/review ")
+  const list = page.locator("#composer-suggestions")
+  await expect(list.getByRole("option", { name: "commit" })).toBeVisible()
+  await expect(list.getByRole("option", { name: "branch" })).toBeVisible()
+  await expect(list.getByRole("option", { name: "pr" })).toBeVisible()
+})
+
 test("suggests and inserts an argument that matches the typed content", async ({ page }) => {
   await login(page)
   await addWorkspace(page)

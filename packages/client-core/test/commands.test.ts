@@ -41,6 +41,16 @@ describe("composerTrigger", () => {
       query: "com",
       start: 8,
       end: 11,
+      hasArgument: false,
+    })
+  })
+
+  it("flags when an argument already precedes the caret's token", () => {
+    expect(composerTrigger("/review commit ", 16)).toMatchObject({
+      kind: "arguments",
+      command: "review",
+      query: "",
+      hasArgument: true,
     })
   })
 
@@ -152,26 +162,57 @@ describe("buildComposerPopover", () => {
 
   it("returns null when a trigger has no matches or no arguments", () => {
     expect(buildComposerPopover({ kind: "command", query: "zzz", start: 0, end: 4 }, commands, [])).toBeNull()
-    expect(buildComposerPopover({ kind: "arguments", command: "init", query: "", start: 6, end: 6 }, commands, [])).toBeNull()
-    expect(buildComposerPopover({ kind: "arguments", command: "missing", query: "", start: 0, end: 0 }, commands, [])).toBeNull()
+    expect(
+      buildComposerPopover({ kind: "arguments", command: "init", query: "", start: 6, end: 6, hasArgument: false }, commands, []),
+    ).toBeNull()
+    expect(
+      buildComposerPopover({ kind: "arguments", command: "missing", query: "", start: 0, end: 0, hasArgument: false }, commands, []),
+    ).toBeNull()
+  })
+
+  it("lists every value when the parameter is empty", () => {
+    const empty = buildComposerPopover(
+      { kind: "arguments", command: "review", query: "", start: 8, end: 8, hasArgument: false },
+      commands,
+      [],
+    )
+    expect(empty?.items.map((item) => item.label)).toEqual(["commit", "branch", "pr"])
   })
 
   it("only shows argument values that match the typed content", () => {
-    // An empty or non-matching token never falls back to the full list.
-    expect(buildComposerPopover({ kind: "arguments", command: "review", query: "", start: 8, end: 8 }, commands, [])).toBeNull()
-    expect(buildComposerPopover({ kind: "arguments", command: "review", query: "zzz", start: 8, end: 11 }, commands, [])).toBeNull()
+    expect(
+      buildComposerPopover({ kind: "arguments", command: "review", query: "zzz", start: 8, end: 11, hasArgument: false }, commands, []),
+    ).toBeNull()
 
-    const matches = buildComposerPopover({ kind: "arguments", command: "review", query: "c", start: 8, end: 9 }, commands, [])
+    const matches = buildComposerPopover(
+      { kind: "arguments", command: "review", query: "c", start: 8, end: 9, hasArgument: false },
+      commands,
+      [],
+    )
     expect(matches?.items.map((item) => item.label)).toEqual(["commit"])
   })
 
+  it("keeps the list closed when an argument already precedes an empty token", () => {
+    expect(
+      buildComposerPopover({ kind: "arguments", command: "review", query: "", start: 16, end: 16, hasArgument: true }, commands, []),
+    ).toBeNull()
+  })
+
   it("builds the argument popover with suggestions and an empty hint", () => {
-    const withValues = buildComposerPopover({ kind: "arguments", command: "review", query: "b", start: 8, end: 9 }, commands, [])
+    const withValues = buildComposerPopover(
+      { kind: "arguments", command: "review", query: "b", start: 8, end: 9, hasArgument: false },
+      commands,
+      [],
+    )
     expect(withValues?.title).toBe("/review")
     expect(withValues?.hint).toBe("1 argument")
     expect(withValues?.items.map((item) => item.label)).toEqual(["branch"])
 
-    const freeForm = buildComposerPopover({ kind: "arguments", command: "component", query: "", start: 11, end: 11 }, commands, [])
+    const freeForm = buildComposerPopover(
+      { kind: "arguments", command: "component", query: "", start: 11, end: 11, hasArgument: false },
+      commands,
+      [],
+    )
     expect(freeForm?.hint).toBe("free-form arguments")
     expect(freeForm?.items).toEqual([])
     expect(freeForm?.emptyLabel).toBe("Type the arguments…")
