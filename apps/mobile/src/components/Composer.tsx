@@ -329,6 +329,8 @@ export function Composer({
             setText(value)
             setDismissed(false)
           }}
+          onFocus={() => setDismissed(false)}
+          onBlur={() => setDismissed(true)}
           selection={forcedSelection}
           onSelectionChange={(event) => {
             setCaret(event.nativeEvent.selection.start)

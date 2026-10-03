@@ -9,7 +9,15 @@ import type { AgentInfo, PromptAgentMention, SlashCommand } from "./types"
 export type ComposerTrigger =
   | { kind: "command"; query: string; start: number; end: number }
   | { kind: "agent"; query: string; start: number; end: number }
-  | { kind: "arguments"; command: string; query: string; start: number; end: number }
+  | {
+      kind: "arguments"
+      command: string
+      query: string
+      start: number
+      end: number
+      /** True when an argument token already precedes the caret's (empty) token. */
+      hasArgument: boolean
+    }
 
 const WHITESPACE = /\s/
 
@@ -62,7 +70,10 @@ function commandTrigger(text: string, caret: number): ComposerTrigger | null {
   if (!command) return null
   const start = tokenStart(text, caret)
   const end = tokenEnd(text, caret)
-  return { kind: "arguments", command, query: text.slice(start, end), start, end }
+  // Anything non-blank between the command name and this token means the user
+  // already wrote an argument, so an empty token after it is just a separator.
+  const hasArgument = text.slice(nameEnd, start).trim() !== ""
+  return { kind: "arguments", command, query: text.slice(start, end), start, end, hasArgument }
 }
 
 /**
@@ -183,17 +194,36 @@ export function buildComposerPopover(
 
   const command = commands.find((item) => item.name === trigger.command)
   if (!command || command.arguments.length === 0) return null
-  const items = argumentSuggestions(command, trigger.query).map((value) => ({
-    id: `argument:${value}`,
-    label: value,
-    replacement: `${value} `,
-  }))
-  const known = argumentSuggestions(command, "").length > 0
+
+  const term = trigger.query.trim()
+  const values = argumentSuggestions(command, term)
+  // A typed token only shows content matches; a non-matching one shows nothing.
+  if (term && values.length === 0) return null
+  // An empty token right after an argument was already written is a separator,
+  // not an empty parameter: keep the list closed so a picked value cannot
+  // re-suggest itself (or its siblings) forever.
+  if (!term && trigger.hasArgument) return null
+
+  if (values.length === 0) {
+    // Empty token for a command that declares arguments without candidate
+    // values (free-form or positional placeholders).
+    return {
+      title: `/${command.name}`,
+      hint: commandArgumentHint(command),
+      items: [],
+      emptyLabel: "Type the arguments…",
+    }
+  }
+
   return {
     title: `/${command.name}`,
     hint: commandArgumentHint(command),
-    items,
-    emptyLabel: known ? "No matches" : "Type the arguments…",
+    items: values.map((value) => ({
+      id: `argument:${value}`,
+      label: value,
+      replacement: `${value} `,
+    })),
+    emptyLabel: "No matches",
   }
 }
 
