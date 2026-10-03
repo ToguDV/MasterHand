@@ -15,11 +15,14 @@ export function CodeBlock({
   title,
   maxLines = 24,
   numbered = true,
+  startLine = 1,
 }: {
   text: string
   title?: string
   maxLines?: number
   numbered?: boolean
+  /** 1-based number of the first line (read pages start at their offset). */
+  startLine?: number
 }) {
   const [expanded, setExpanded] = useState(false)
   const showNumbers = numbered && !looksLineNumbered(text)
@@ -43,7 +46,7 @@ export function CodeBlock({
       <View style={styles.blockBody}>
         {lines.map((line, index) => (
           <View key={index} style={styles.codeRow}>
-            {showNumbers ? <Text style={styles.lineNumber}>{index + 1}</Text> : null}
+            {showNumbers ? <Text style={styles.lineNumber}>{startLine + index}</Text> : null}
             <Text selectable style={styles.codeText}>
               {line || " "}
             </Text>

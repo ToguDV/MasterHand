@@ -11,6 +11,7 @@ import {
   looksLikeDiff,
   looksLineNumbered,
   parsePatch,
+  parseReadOutput,
   pathParts,
   stripAnsi,
   truncateLines,
@@ -245,6 +246,74 @@ describe("parsePatch", () => {
       { kind: "remove", text: "a" },
       { kind: "add", text: "b" },
     ])
+  })
+})
+
+describe("parseReadOutput", () => {
+  it("strips the v2 header and the per-line prefixes", () => {
+    const parsed = parseReadOutput("Read file /w/a.ts, lines 1-3\n1: const a = 1\n2: const b = 2\n3: const c = 3")
+    expect(parsed).toEqual({
+      path: "/w/a.ts",
+      startLine: 1,
+      endLine: 3,
+      content: "const a = 1\nconst b = 2\nconst c = 3",
+      truncatedNext: null,
+    })
+  })
+
+  it("keeps the real first line number for offset pages", () => {
+    const parsed = parseReadOutput("Read file /w/a.ts, lines 21-22\n21: x\n22: y")
+    expect(parsed.startLine).toBe(21)
+    expect(parsed.content).toBe("x\ny")
+  })
+
+  it("handles an empty file", () => {
+    const parsed = parseReadOutput("Read file /w/empty.ts, 0 lines")
+    expect(parsed).toMatchObject({ path: "/w/empty.ts", startLine: null, content: "" })
+  })
+
+  it("handles directory listings without numbering", () => {
+    const parsed = parseReadOutput("Read directory /w/src, 2 entries\na.ts\nb.ts")
+    expect(parsed).toMatchObject({ path: "/w/src", startLine: null, content: "a.ts\nb.ts" })
+  })
+
+  it("separates the truncation footer", () => {
+    const parsed = parseReadOutput(
+      "Read file /w/big.ts, lines 1-2\n1: a\n2: b\n[Output truncated. Continue reading with offset: 2000]",
+    )
+    expect(parsed.content).toBe("a\nb")
+    expect(parsed.truncatedNext).toBe(2000)
+  })
+
+  it("unwraps the legacy v1 XML output", () => {
+    const parsed = parseReadOutput("<path>/w/a.json</path>\n<type>file</type>\n<content>\n1: {}\n2: []\n</content>")
+    expect(parsed).toMatchObject({ path: "/w/a.json", startLine: 1, content: "{}\n[]" })
+  })
+
+  it("passes through output without a header", () => {
+    const parsed = parseReadOutput("00001| a\n00002| b")
+    expect(parsed).toMatchObject({ path: null, startLine: null, content: "00001| a\n00002| b" })
+  })
+
+  it("feeds the read summary with the parsed path, range and clean content", () => {
+    const part = toolPart("read", {
+      input: { filePath: "src/a.ts" },
+      output: "Read file src/a.ts, lines 1-2\n1: const a = 1\n2: const b = 2",
+    })
+    const summary = describeTool(part)
+    expect(summary).toMatchObject({
+      kind: "read",
+      title: "src/a.ts",
+      subtitle: "lines 1-2",
+      startLine: 1,
+      content: "const a = 1\nconst b = 2",
+    })
+  })
+
+  it("falls back to the header path when the input has none", () => {
+    const part = toolPart("read", { input: {}, output: "Read file /w/only.ts, lines 5-5\n5: hello" })
+    const summary = describeTool(part)
+    expect(summary).toMatchObject({ kind: "read", title: "/w/only.ts", startLine: 5, content: "hello" })
   })
 })
 

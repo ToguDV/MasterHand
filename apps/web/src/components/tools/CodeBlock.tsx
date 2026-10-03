@@ -37,6 +37,7 @@ export function CodeBlock({
   title,
   maxLines = 24,
   numbered = true,
+  startLine = 1,
   className = "",
 }: {
   text: string
@@ -44,6 +45,8 @@ export function CodeBlock({
   title?: string
   maxLines?: number
   numbered?: boolean
+  /** 1-based number of the first line (read pages start at their offset). */
+  startLine?: number
   className?: string
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -75,7 +78,9 @@ export function CodeBlock({
             {lines.map((line, index) => (
               <span key={index} className="block whitespace-pre-wrap break-words">
                 {showNumbers && (
-                  <span className="mr-3 inline-block w-6 select-none text-right text-zinc-600">{index + 1}</span>
+                  <span className="mr-3 inline-block w-6 select-none text-right text-zinc-600">
+                    {startLine + index}
+                  </span>
                 )}
                 {line || " "}
               </span>

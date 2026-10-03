@@ -420,7 +420,11 @@ async function runToolsPrompt(sessionID: string): Promise<void> {
   await runTool("bash", { command: "npm test -- --run", description: "Run the test suite" }, "Tests passed", {
     exitCode: 0,
   })
-  await runTool("read", { filePath: "src/app.ts" }, "00001| export const app = 1\n00002| export const port = 3000")
+  await runTool(
+    "read",
+    { filePath: "src/app.ts" },
+    "Read file src/app.ts, lines 1-2\n1: export const app = 1\n2: export const port = 3000",
+  )
   await runTool("write", { filePath: "src/new.ts", content: "export const answer = 42" }, "File written")
   await runTool(
     "edit",

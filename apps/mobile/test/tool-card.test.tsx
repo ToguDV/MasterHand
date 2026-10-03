@@ -52,15 +52,24 @@ describe("ToolCard", () => {
     expect(screen.getByText("command failed")).toBeOnTheScreen()
   })
 
-  it("renders a read with its line count and content", async () => {
+  it("renders a read without its output header or double numbering", async () => {
     await render(
-      <ToolCard part={part("read", { input: { filePath: "src/app.ts" }, output: "00001| a\n00002| b" })} />,
+      <ToolCard
+        part={part("read", {
+          input: { filePath: "src/app.ts" },
+          output: "Read file src/app.ts, lines 1-2\n1: export const app = 1\n2: export const port = 3000",
+        })}
+      />,
     )
 
     expect(screen.getByText("src/app.ts")).toBeOnTheScreen()
-    expect(screen.getByText(/2 lines/)).toBeOnTheScreen()
+    expect(screen.getByText(/lines 1-2/)).toBeOnTheScreen()
     await fireEvent.press(screen.getByText("src/app.ts"))
-    expect(screen.getByText("00001| a")).toBeOnTheScreen()
+    expect(screen.getByText("export const app = 1")).toBeOnTheScreen()
+    expect(screen.getByText("export const port = 3000")).toBeOnTheScreen()
+    // The opencode header and the `N:` prefixes are not rendered as content.
+    expect(screen.queryByText(/Read file/)).toBeNull()
+    expect(screen.queryByText(/^1: /)).toBeNull()
   })
 
   it("renders a write with its content", async () => {

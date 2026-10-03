@@ -67,10 +67,20 @@ function ToolBody({ summary }: { summary: ToolSummary }) {
         />
       )
     case "read":
-      return summary.content ? (
-        <CodeBlock text={summary.content} numbered={!looksLineNumbered(summary.content)} maxLines={28} />
-      ) : (
-        <Text style={styles.mutedText}>Reading…</Text>
+      if (summary.content === undefined) return <Text style={styles.mutedText}>Reading…</Text>
+      if (summary.content === "") return <Text style={styles.mutedText}>Empty file</Text>
+      return (
+        <View style={styles.stack}>
+          <CodeBlock
+            text={summary.content}
+            numbered={!looksLineNumbered(summary.content)}
+            startLine={summary.startLine ?? 1}
+            maxLines={28}
+          />
+          {summary.truncatedNext !== undefined ? (
+            <Text style={styles.mutedText}>Output truncated · continue from line {summary.truncatedNext}</Text>
+          ) : null}
+        </View>
       )
     case "write":
       return summary.content ? (

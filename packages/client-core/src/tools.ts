@@ -82,7 +82,17 @@ export type ToolSummary =
       exitCode: number | null
       output?: string
     })
-  | (ToolSummaryBase & { kind: "read"; path: string; offset?: number; limit?: number; content?: string })
+  | (ToolSummaryBase & {
+      kind: "read"
+      path: string
+      offset?: number
+      limit?: number
+      content?: string
+      /** 1-based first line of the page, for correct line numbering. */
+      startLine?: number
+      /** Offset to continue from when opencode truncated the page. */
+      truncatedNext?: number
+    })
   | (ToolSummaryBase & { kind: "write"; path: string; content: string; lines: number })
   | (ToolSummaryBase & {
       kind: "edit"
@@ -183,6 +193,81 @@ export function stripAnsi(text: string): string {
 /** True when the text already carries line numbers (`00001| foo`). */
 export function looksLineNumbered(text: string): boolean {
   return /^\s*\d+\|/m.test(text)
+}
+
+/** One-page read output: header, `<line>: <content>` body and truncation footer. */
+export interface ParsedReadOutput {
+  /** Path reported by the header (fallback when the tool input has none). */
+  path: string | null
+  /** 1-based first line of the page (null for directories/empty reads). */
+  startLine: number | null
+  endLine: number | null
+  /** Body without the header, the per-line prefixes or the truncation footer. */
+  content: string
+  /** Offset opencode suggests to continue when the page was truncated. */
+  truncatedNext: number | null
+}
+
+// opencode v2: `Read file <path>, lines <start>-<end>` (or `, 0 lines`), a
+// `<line>: <content>` body and an optional truncation footer. Directories use
+// `Read directory <path>, N entries` with plain entry lines.
+const READ_HEADER = /^Read (?:file|directory) (.+?)(?:, lines (\d+)-(\d+)|, (\d+) (?:lines|entries))\s*\n?/
+const READ_TRUNCATED = /\[Output truncated\. Continue reading with offset: (\d+)\]\s*$/
+// Legacy v1 wrapper still present in old session histories.
+const READ_LEGACY = /^<path>([\s\S]*?)<\/path>\s*<type>[\s\S]*?<\/type>\s*<content>\s*\n?/
+
+/** Removes the `N: ` prefixes opencode adds, when they are sequential from `start`. */
+function stripLinePrefixes(text: string, start: number): string {
+  const lines = text.split("\n")
+  const first = lines[0]?.match(/^(\d+): ?/)
+  if (!first || Number(first[1]) !== start) return text
+  let expected = start
+  return lines
+    .map((line) => {
+      const match = /^(\d+): ?(.*)$/.exec(line)
+      if (match && Number(match[1]) === expected) {
+        expected++
+        return match[2] ?? ""
+      }
+      return line
+    })
+    .join("\n")
+}
+
+/** Parses the read tool output into a clean path, line range and content body. */
+export function parseReadOutput(output: string): ParsedReadOutput {
+  const header = READ_HEADER.exec(output)
+  if (header) {
+    const start = header[2] ? Number(header[2]) : null
+    const end = header[3] ? Number(header[3]) : null
+    let body = output.slice(header[0].length)
+    const truncated = READ_TRUNCATED.exec(body)
+    const truncatedNext = truncated ? Number(truncated[1]) : null
+    if (truncated?.index !== undefined) body = body.slice(0, truncated.index)
+    return {
+      path: header[1] ?? null,
+      startLine: start,
+      endLine: end,
+      content: (start !== null ? stripLinePrefixes(body, start) : body).replace(/\n+$/, ""),
+      truncatedNext,
+    }
+  }
+
+  const legacy = READ_LEGACY.exec(output)
+  if (legacy) {
+    const body = output.slice(legacy[0].length).replace(/\s*<\/content>\s*$/, "")
+    const first = body.match(/^(\d+): /)
+    const start = first ? Number(first[1]) : null
+    return {
+      path: legacy[1] ?? null,
+      startLine: start,
+      endLine: null,
+      content: (start !== null ? stripLinePrefixes(body, start) : body).replace(/\n+$/, ""),
+      truncatedNext: null,
+    }
+  }
+
+  return { path: null, startLine: null, endLine: null, content: output, truncatedNext: null }
 }
 
 /** True when the text looks like a unified diff (`@@` hunks or a `+++` header). */
@@ -425,21 +510,32 @@ export function describeTool(part: ChatToolPart): ToolSummary {
     }
 
     case "read": {
-      const path = readString(input, "filePath", "path", "file")
+      const parsed = parseReadOutput(state.output ?? "")
+      const path = readString(input, "filePath", "path", "file") ?? parsed.path
       if (!path) return genericSummary(part, state, status)
       const offset = readNumber(input, "offset") ?? undefined
       const limit = readNumber(input, "limit") ?? undefined
+      const content = state.output !== undefined ? parsed.content : undefined
+      const lines = content ? content.split("\n").length : 0
+      const subtitle =
+        parsed.startLine !== null && parsed.endLine !== null
+          ? `lines ${parsed.startLine}-${parsed.endLine}`
+          : content
+            ? lineCountLabel(lines)
+            : undefined
       return {
         ...baseOf(part),
         kind: "read",
         icon: "file",
         accent: "sky",
         title: path,
-        subtitle: state.output ? lineCountLabel(state.output.split("\n").length) : undefined,
+        subtitle,
         path,
         offset,
         limit,
-        content: state.output,
+        content,
+        startLine: parsed.startLine ?? offset,
+        truncatedNext: parsed.truncatedNext ?? undefined,
       }
     }
 

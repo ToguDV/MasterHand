@@ -22,12 +22,17 @@ test("renders tool calls as semantic collapsible cards", async ({ page }) => {
   await shell.locator("button").first().click()
   await expect(shell).toContainText("Tests passed")
 
-  // Read: file path and line count; the body shows the file content.
+  // Read: file path and line range; the header and `N:` prefixes are not part
+  // of the body, and the content is numbered once by the client.
   const read = main.locator('[data-tool="read"]')
   await expect(read).toContainText("src/app.ts")
-  await expect(read).toContainText("2 lines")
+  await expect(read).toContainText("lines 1-2")
   await read.locator("button").first().click()
   await expect(read).toContainText("export const app = 1")
+  await expect(read).not.toContainText("Read file")
+  await expect(read.getByText("1", { exact: true })).toBeVisible()
+  await expect(read.getByText("2", { exact: true })).toBeVisible()
+  await expect(read.getByText("1:", { exact: false })).toHaveCount(0)
 
   // Write: file path and content.
   const write = main.locator('[data-tool="write"]')

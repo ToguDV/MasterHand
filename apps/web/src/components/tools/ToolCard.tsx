@@ -132,15 +132,23 @@ function ToolBody({ summary }: { summary: ToolSummary }) {
         />
       )
     case "read":
-      return summary.content ? (
-        <CodeBlock
-          text={summary.content}
-          numbered={!looksLineNumbered(summary.content)}
-          maxLines={28}
-          className="border-zinc-800/70"
-        />
-      ) : (
-        <p className="px-0.5 text-xs text-zinc-500">Reading…</p>
+      if (summary.content === undefined) return <p className="px-0.5 text-xs text-zinc-500">Reading…</p>
+      if (summary.content === "") return <p className="px-0.5 text-xs text-zinc-500">Empty file</p>
+      return (
+        <div className="space-y-1.5">
+          <CodeBlock
+            text={summary.content}
+            numbered={!looksLineNumbered(summary.content)}
+            startLine={summary.startLine ?? 1}
+            maxLines={28}
+            className="border-zinc-800/70"
+          />
+          {summary.truncatedNext !== undefined && (
+            <p className="px-0.5 text-[10px] text-zinc-600">
+              Output truncated · continue from line {summary.truncatedNext}
+            </p>
+          )}
+        </div>
       )
     case "write":
       return summary.content ? (
